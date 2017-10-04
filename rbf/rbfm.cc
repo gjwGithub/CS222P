@@ -34,41 +34,6 @@ RC RecordBasedFileManager::closeFile(FileHandle &fileHandle) {
     return PagedFileManager::instance()->closeFile(fileHandle);
 }
 
-//int RecordBasedFileManager::getDataSize(const vector<Attribute> &recordDescriptor, const void *data)
-//{
-//    int offset = 0;
-//    bool nullBit = false;
-//    int nullFieldsIndicatorActualSize = ceil((double) recordDescriptor.size() / CHAR_BIT);
-//    unsigned char *nullFieldsIndicator = new unsigned char[nullFieldsIndicatorActualSize];
-//    memcpy(nullFieldsIndicator, (char *)data + offset, nullFieldsIndicatorActualSize);
-//    offset += nullFieldsIndicatorActualSize;
-//    for (size_t i = 0; i < recordDescriptor.size(); i++)
-//    {
-//        nullBit = nullFieldsIndicator[i / CHAR_BIT] & (1 << (CHAR_BIT - 1 - i % CHAR_BIT));
-//        if (!nullBit) 
-//        {
-//            AttrType type = recordDescriptor[i].type;
-//            if (type == TypeInt)
-//            {
-//                offset += sizeof(int);
-//            }
-//            else if (type == TypeReal)
-//            {
-//                offset += sizeof(float);
-//            }
-//            else if (type == TypeVarChar)
-//            {
-//                int strLength;
-//                memcpy(&strLength, (char *)data + offset, sizeof(int));
-//                offset += sizeof(int);
-//                offset += strLength;
-//            }    
-//        }
-//    }
-//    delete nullFieldsIndicator;
-//    return offset - nullFieldsIndicatorActualSize;
-//}
-
 void RecordBasedFileManager::generateFieldInfo(const vector<Attribute> &recordDescriptor, const void *data, int &resultLength, char* &result, int &dataSize)
 {
 	int dataOffset = 0;
@@ -185,21 +150,13 @@ RC RecordBasedFileManager::addDataInNewPage(FileHandle &fileHandle, const vector
     char *newData = new char[sizeof(int) + slotSize];
     int offset = 0;
     int pageSize = sizeof(int) + slotSize;
-    //int slotSize = sizeof(int) + dataSize;
     memcpy(newData + offset, &pageSize, sizeof(int));
     offset += sizeof(int);
     memcpy(newData + offset, &slotSize, sizeof(int));
     offset += sizeof(int);
 	memcpy(newData + offset, fieldInfo, fieldInfoSize);
 	offset += fieldInfoSize;
-	//cout << "fieldInfoSize: " << fieldInfoSize << endl;
 	memcpy(newData + offset, (char *)data + nullFieldsIndicatorActualSize, dataSize);
-	//cout << "datasize: " << dataSize << endl;
-	/*int field4;
-	memcpy(&field4, newData + sizeof(int) *(3 + 3), sizeof(int));
-	int vfield4;
-	memcpy(&vfield4, newData + sizeof(int) + field4, sizeof(int));
-	cout << "field4: " << vfield4 << endl;*/
     RC status = fileHandle.appendPage(newData);
     if (status == -1)
     {
@@ -218,8 +175,6 @@ RC RecordBasedFileManager::addDataInNewPage(FileHandle &fileHandle, const vector
 
 RC RecordBasedFileManager::insertRecord(FileHandle &fileHandle, const vector<Attribute> &recordDescriptor, const void *data, RID &rid) {
     int totalPageNum = fileHandle.getNumberOfPages();
-    //int dataSize = getDataSize(recordDescriptor, data);
-    //int slotSize = sizeof(int) + dataSize;
     if (totalPageNum == 0)
     {
         RC status = addDataInNewPage(fileHandle, recordDescriptor, data, rid);
@@ -288,7 +243,6 @@ RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const vector<Attri
 	}
 	memcpy(data, nullFieldsIndicator, nullFieldsIndicatorActualSize);
 	int dataSize = slotSize - offset + slotNum;
-	//cout << "datasize" << dataSize << " slotsize" << slotSize << endl;
 	memcpy((char*)data + nullFieldsIndicatorActualSize, pageData + offset, dataSize);
 	delete pageData;
 	delete nullFieldsIndicator;
