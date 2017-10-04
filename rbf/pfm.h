@@ -4,6 +4,7 @@
 typedef unsigned PageNum;
 typedef int RC;
 typedef char byte;
+typedef short OffsetType;
 
 #define PAGE_SIZE 4096
 #include <string>
