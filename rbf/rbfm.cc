@@ -95,7 +95,9 @@ RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector
     RC status = fileHandle.readPage(pageNum, pageData);
     if (status == -1)
     {
+#ifdef DEBUG
 		cerr << "Cannot read page " << pageNum << endl;
+#endif
 		delete pageData;
         return -1;
     }
@@ -120,7 +122,9 @@ RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector
         status = fileHandle.writePage(pageNum, pageData);
         if (status == -1)
         {
+#ifdef DEBUG
             cerr << "Cannot write page " << pageNum << endl;
+#endif
 			delete pageData;
 			delete fieldInfo;
             return -1;
@@ -160,7 +164,9 @@ RC RecordBasedFileManager::addDataInNewPage(FileHandle &fileHandle, const vector
     RC status = fileHandle.appendPage(newData);
     if (status == -1)
     {
+#ifdef DEBUG
         cerr << "Cannot append a page while insert a record" << endl;
+#endif
 		delete newData;
 		delete fieldInfo;
         return -1;
@@ -215,7 +221,9 @@ RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const vector<Attri
 	RC status = fileHandle.readPage(pageNum, pageData);
 	if (status == -1)
 	{
+#ifdef DEBUG
 		cerr << "Cannot read page " << pageNum << endl;
+#endif
 		delete pageData;
 		return -1;
 	}
@@ -258,6 +266,7 @@ RC RecordBasedFileManager::printRecord(const vector<Attribute> &recordDescriptor
 	offset += nullFieldsIndicatorActualSize;
 	for (size_t i = 0; i < recordDescriptor.size(); i++)
 	{
+		cout << recordDescriptor[i].name << ": ";
 		nullBit = nullFieldsIndicator[i / CHAR_BIT] & (1 << (CHAR_BIT - 1 - i % CHAR_BIT));
 		if (!nullBit)
 		{

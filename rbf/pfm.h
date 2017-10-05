@@ -6,6 +6,8 @@ typedef int RC;
 typedef char byte;
 typedef short OffsetType;
 
+//#define DEBUG
+
 #define PAGE_SIZE 4096
 #include <string>
 #include <climits>
