@@ -227,6 +227,14 @@ RC FileHandle::writePage(PageNum pageNum, const void *data)
 #endif
 		return -1;
 	}
+	int status = fflush(file);
+	if (status)
+	{
+#ifdef DEBUG
+		cerr << "Cannot flush the file" << endl;
+#endif
+		return -1;
+	}
     ++writePageCounter;
 	return 0;
 }
