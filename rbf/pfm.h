@@ -6,12 +6,14 @@ typedef int RC;
 typedef char byte;
 typedef short OffsetType;
 
-//#define DEBUG
+#define DEBUG
 
 #define PAGE_SIZE 4096
 #include <string>
 #include <climits>
 #include <iostream>
+#include <cstdlib>
+#include <cstring>
 using namespace std;
 
 class FileHandle;
@@ -42,6 +44,7 @@ public:
     unsigned readPageCounter;
     unsigned writePageCounter;
     unsigned appendPageCounter;
+	PageNum pageNum;
 
     FILE *file;
     RC setFile(FILE *file);
@@ -55,6 +58,9 @@ public:
     RC appendPage(const void *data);                                      // Append a specific page
     unsigned getNumberOfPages();                                          // Get the number of pages in the file
     RC collectCounterValues(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount);  // Put the current counter values into variables
+
+	RC readMetaData(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount, PageNum &pageNum);
+	RC writeMetaData(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount, PageNum &pageNum);
 }; 
 
 #endif
