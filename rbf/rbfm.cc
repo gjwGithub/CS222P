@@ -27,7 +27,26 @@ RC RecordBasedFileManager::destroyFile(const string &fileName) {
 }
 
 RC RecordBasedFileManager::openFile(const string &fileName, FileHandle &fileHandle) {
-    return PagedFileManager::instance()->openFile(fileName, fileHandle);
+	RC status = PagedFileManager::instance()->openFile(fileName, fileHandle);
+	PageNum pageCountInAllPagesSize = this->allPagesSize.size();
+	for (PageNum i = 0; i < fileHandle.getNumberOfPages(); i++)
+	{
+		int status = fseek(fileHandle.getFile(), (i + 1) * PAGE_SIZE, SEEK_SET);
+		if (status)
+		{
+#ifdef DEBUG
+			cerr << "fseek error in reading meta data " << endl;
+#endif
+			return -1;
+		}
+		int pageSize = 0;
+		fread(&pageSize, 1, sizeof(OffsetType), fileHandle.getFile());
+		if (i < pageCountInAllPagesSize)
+			this->allPagesSize[i] = pageSize;
+		else
+			this->allPagesSize.push_back(pageSize);
+	}
+    return status;
 }
 
 RC RecordBasedFileManager::closeFile(FileHandle &fileHandle) {
@@ -88,24 +107,24 @@ void RecordBasedFileManager::generateFieldInfo(const vector<Attribute> &recordDe
 
 RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector<Attribute> &recordDescriptor, int pageNum, const void *data, RID &rid, OffsetType &fieldInfoSize, char* &fieldInfo, OffsetType &dataSize)
 {
-	OffsetType oldPageOffset;
-    char *pageData = new char[PAGE_SIZE];
-    RC status = fileHandle.readPage(pageNum, pageData);
-    if (status == -1)
-    {
-#ifdef DEBUG
-		cerr << "Cannot read page " << pageNum << endl;
-#endif
-		delete pageData;
-        return -1;
-    }
-    memcpy(&oldPageOffset, pageData, sizeof(OffsetType));
-	
+	OffsetType oldPageOffset = this->allPagesSize[pageNum];
 	OffsetType slotSize = sizeof(OffsetType) + fieldInfoSize + dataSize;
-	int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
     if (oldPageOffset + slotSize <= PAGE_SIZE)
     {
+		char *pageData = new char[PAGE_SIZE];
+		RC status = fileHandle.readPage(pageNum, pageData);
+		if (status == -1)
+		{
+#ifdef DEBUG
+			cerr << "Cannot read page " << pageNum << " while append data in that page" << endl;
+#endif
+			delete pageData;
+			return -1;
+		}
+
 		OffsetType newPageOffset = oldPageOffset + slotSize;
+		this->allPagesSize[pageNum] = newPageOffset;
+		int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
 		OffsetType offset = 0;
         memcpy(pageData + offset, &newPageOffset, sizeof(OffsetType));
         offset += oldPageOffset;
@@ -120,6 +139,7 @@ RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector
 #ifdef DEBUG
             cerr << "Cannot write page " << pageNum << endl;
 #endif
+			this->allPagesSize[pageNum] = oldPageOffset;
 			delete pageData;
             return -1;
         }
@@ -128,10 +148,8 @@ RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector
     }
     else
     {
-        delete pageData;
         return 0;
     }
-    delete pageData;
     return 1;
 }
 
@@ -140,6 +158,7 @@ RC RecordBasedFileManager::addDataInNewPage(FileHandle &fileHandle, const vector
 	OffsetType slotSize = sizeof(OffsetType) + fieldInfoSize + dataSize;
 	int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
 	OffsetType pageSize = sizeof(OffsetType) + slotSize;
+	this->allPagesSize.push_back(pageSize);
     char *newData = new char[pageSize];
 	OffsetType offset = 0;
     memcpy(newData + offset, &pageSize, sizeof(OffsetType));
@@ -155,12 +174,13 @@ RC RecordBasedFileManager::addDataInNewPage(FileHandle &fileHandle, const vector
 #ifdef DEBUG
         cerr << "Cannot append a page while insert a record" << endl;
 #endif
+		this->allPagesSize.pop_back();
 		delete newData;
         return -1;
     }
-    int totalPageNum = fileHandle.getNumberOfPages();
-    rid.pageNum = totalPageNum - 1;
-    rid.slotNum = sizeof(OffsetType);
+	int totalPageNum = fileHandle.getNumberOfPages();
+	rid.pageNum = totalPageNum - 1;
+	rid.slotNum = sizeof(OffsetType);
     delete newData;
     return 0;
 }

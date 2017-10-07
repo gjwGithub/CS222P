@@ -41,7 +41,7 @@ RC PagedFileManager::createFile(const string &fileName)
 	int readPageCounter = 0;
 	int writePageCounter = 0;
 	int appendPageCounter = 0;
-	int pageNum = 0;
+	PageNum pageNum = 0;
 	char* metaData = new char[sizeof(int) * 4];
 	OffsetType offset = 0;
 	memcpy(metaData + offset, &readPageCounter, sizeof(int));
@@ -50,8 +50,8 @@ RC PagedFileManager::createFile(const string &fileName)
 	offset += sizeof(int);
 	memcpy(metaData + offset, &appendPageCounter, sizeof(int));
 	offset += sizeof(int);
-	memcpy(metaData + offset, &pageNum, sizeof(int));
-	offset += sizeof(int);
+	memcpy(metaData + offset, &pageNum, sizeof(PageNum));
+	offset += sizeof(PageNum);
 	size_t writeSize = fwrite(metaData, 1, PAGE_SIZE, file);
 	if (writeSize != PAGE_SIZE)
 	{
@@ -143,11 +143,11 @@ RC PagedFileManager::openFile(const string &fileName, FileHandle &fileHandle)
 	{ 
 		fileHandle.setFile(file);
     }
-	RC status = fileHandle.readMetaData(fileHandle.readPageCounter, fileHandle.writePageCounter, fileHandle.appendPageCounter, fileHandle.pageNum);
+	RC status = fileHandle.readMetaData(fileHandle.readPageCounter, fileHandle.writePageCounter, fileHandle.appendPageCounter, fileHandle.pageCount);
 	if (status == -1)
 	{
 #ifdef DEBUG
-		cerr << "write meta data error in appending page" << endl;
+		cerr << "Read meta data error in open file" << endl;
 #endif
 		return -1;
 	}
@@ -192,6 +192,7 @@ FileHandle::FileHandle()
     writePageCounter = 0;
 	appendPageCounter = 0;
 	file = NULL;
+	pageCount = 0;
 }
 
 
@@ -234,7 +235,7 @@ RC FileHandle::readPage(PageNum pageNum, void *data)
 		return -1;
 	}
     ++readPageCounter;
-	status = writeMetaData(this->readPageCounter, this->writePageCounter, this->appendPageCounter, this->pageNum);
+	status = writeMetaData(this->readPageCounter, this->writePageCounter, this->appendPageCounter, this->pageCount);
 	if (status == -1)
 	{
 #ifdef DEBUG
@@ -288,7 +289,7 @@ RC FileHandle::writePage(PageNum pageNum, const void *data)
 		return -1;
 	}
     ++writePageCounter;
-	status = writeMetaData(this->readPageCounter, this->writePageCounter, this->appendPageCounter, this->pageNum);
+	status = writeMetaData(this->readPageCounter, this->writePageCounter, this->appendPageCounter, this->pageCount);
 	if (status == -1)
 	{
 #ifdef DEBUG
@@ -326,8 +327,8 @@ RC FileHandle::appendPage(const void *data)
 		return -1;
 	}
 	++appendPageCounter;
-	++this->pageNum;
-	status = writeMetaData(this->readPageCounter, this->writePageCounter, this->appendPageCounter, this->pageNum);
+	++(this->pageCount);
+	status = writeMetaData(this->readPageCounter, this->writePageCounter, this->appendPageCounter, this->pageCount);
 	if (status == -1)
 	{
 #ifdef DEBUG
@@ -341,7 +342,7 @@ RC FileHandle::appendPage(const void *data)
 
 unsigned FileHandle::getNumberOfPages()
 {
-	return this->pageNum;
+	return this->pageCount;
 }
 
 
@@ -364,7 +365,7 @@ FILE* FileHandle::getFile()
     return this->file;
 }
 
-RC FileHandle::readMetaData(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount, PageNum &pageNum)
+RC FileHandle::readMetaData(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount, PageNum &pageCount)
 {
 	if (!this->file)
 	{
@@ -398,12 +399,13 @@ RC FileHandle::readMetaData(unsigned &readPageCount, unsigned &writePageCount, u
 	offset += sizeof(unsigned);
 	memcpy(&(this->appendPageCounter), data + offset, sizeof(unsigned));
 	offset += sizeof(unsigned);
-	memcpy(&(this->pageNum), data + offset, sizeof(PageNum));
+	memcpy(&(this->pageCount), data + offset, sizeof(PageNum));
+	offset += sizeof(PageNum);
 	delete data;
 	return 0;
 }
 
-RC FileHandle::writeMetaData(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount, PageNum &pageNum)
+RC FileHandle::writeMetaData(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount, PageNum &pageCount)
 {
 	if (!this->file)
 	{
@@ -428,8 +430,8 @@ RC FileHandle::writeMetaData(unsigned &readPageCount, unsigned &writePageCount, 
 	offset += sizeof(unsigned);
 	memcpy(data + offset, &(this->appendPageCounter), sizeof(unsigned));
 	offset += sizeof(unsigned);
-	memcpy(data + offset, &(this->pageNum), sizeof(PageNum));
-	
+	memcpy(data + offset, &(this->pageCount), sizeof(unsigned));
+	offset += sizeof(unsigned);
 	size_t writeSize = fwrite(data, 1, PAGE_SIZE, this->file);
 	if (writeSize != PAGE_SIZE)
 	{

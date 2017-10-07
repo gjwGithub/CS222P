@@ -14,6 +14,7 @@ typedef short OffsetType;
 #include <iostream>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 using namespace std;
 
 class FileHandle;
@@ -44,7 +45,7 @@ public:
     unsigned readPageCounter;
     unsigned writePageCounter;
     unsigned appendPageCounter;
-	PageNum pageNum;
+	unsigned pageCount;
 
     FILE *file;
     RC setFile(FILE *file);
@@ -59,8 +60,8 @@ public:
     unsigned getNumberOfPages();                                          // Get the number of pages in the file
     RC collectCounterValues(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount);  // Put the current counter values into variables
 
-	RC readMetaData(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount, PageNum &pageNum);
-	RC writeMetaData(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount, PageNum &pageNum);
+	RC readMetaData(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount, PageNum &pageCount);
+	RC writeMetaData(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount, PageNum &pageCount);
 }; 
 
 #endif
