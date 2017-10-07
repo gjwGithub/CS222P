@@ -42,26 +42,33 @@ void RecordBasedFileManager::generateFieldInfo(const vector<Attribute> &recordDe
 	unsigned char *nullFieldsIndicator = new unsigned char[nullFieldsIndicatorActualSize];
 	memcpy(nullFieldsIndicator, (char *)data + dataOffset, nullFieldsIndicatorActualSize);
 	dataOffset += nullFieldsIndicatorActualSize;
-	vector<OffsetType> fieldOffsets;
+
+	size_t fieldsNum = recordDescriptor.size();
+	resultLength = sizeof(OffsetType) + fieldsNum * sizeof(OffsetType);
+	result = new char[resultLength];
+	OffsetType offset = 0;
+	memcpy(result + offset, &fieldsNum, sizeof(int));
+	offset += sizeof(OffsetType);
 	for (size_t i = 0; i < recordDescriptor.size(); i++)
 	{
+		OffsetType fieldOffset = 0;
 		nullBit = nullFieldsIndicator[i / CHAR_BIT] & (1 << (CHAR_BIT - 1 - i % CHAR_BIT));
 		if (!nullBit)
 		{
 			AttrType type = recordDescriptor[i].type;
 			if (type == TypeInt)
 			{
-				fieldOffsets.push_back(dataOffset);
+				fieldOffset = dataOffset;
 				dataOffset += sizeof(int);
 			}
 			else if (type == TypeReal)
 			{
-				fieldOffsets.push_back(dataOffset);
+				fieldOffset = dataOffset;
 				dataOffset += sizeof(float);
 			}
 			else if (type == TypeVarChar)
 			{
-				fieldOffsets.push_back(dataOffset);
+				fieldOffset = dataOffset;
 				int strLength;
 				memcpy(&strLength, (char *)data + dataOffset, sizeof(int));
 				dataOffset += sizeof(int);
@@ -69,26 +76,17 @@ void RecordBasedFileManager::generateFieldInfo(const vector<Attribute> &recordDe
 			}
 		}
 		else
-			fieldOffsets.push_back(-1);
-	}
-	delete nullFieldsIndicator;
-	size_t fieldsNum = fieldOffsets.size();
-	resultLength = sizeof(OffsetType) + fieldsNum * sizeof(OffsetType);
-	result = new char[resultLength];
-	OffsetType offset = 0;
-	memcpy(result + offset, &fieldsNum, sizeof(int));
-	offset += sizeof(OffsetType);
-	for (size_t i = 0; i < fieldOffsets.size(); i++)
-	{
-		if (fieldOffsets[i] != -1)
-			fieldOffsets[i] += sizeof(OffsetType) + resultLength - nullFieldsIndicatorActualSize;
-		memcpy(result + offset, &fieldOffsets[i], sizeof(OffsetType));
+			fieldOffset = -1;
+		if (fieldOffset != -1)
+			fieldOffset += sizeof(OffsetType) + resultLength - nullFieldsIndicatorActualSize;
+		memcpy(result + offset, &fieldOffset, sizeof(OffsetType));
 		offset += sizeof(OffsetType);
 	}
+	delete nullFieldsIndicator;
 	dataSize = dataOffset - nullFieldsIndicatorActualSize;
 }
 
-RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector<Attribute> &recordDescriptor, int pageNum, const void *data, RID &rid)
+RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector<Attribute> &recordDescriptor, int pageNum, const void *data, RID &rid, OffsetType &fieldInfoSize, char* &fieldInfo, OffsetType &dataSize)
 {
 	OffsetType oldPageOffset;
     char *pageData = new char[PAGE_SIZE];
@@ -102,10 +100,7 @@ RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector
         return -1;
     }
     memcpy(&oldPageOffset, pageData, sizeof(OffsetType));
-	OffsetType dataSize;
-	OffsetType fieldInfoSize;
-	char* fieldInfo;
-	generateFieldInfo(recordDescriptor, data, fieldInfoSize, fieldInfo, dataSize);
+	
 	OffsetType slotSize = sizeof(OffsetType) + fieldInfoSize + dataSize;
 	int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
     if (oldPageOffset + slotSize <= PAGE_SIZE)
@@ -126,7 +121,6 @@ RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector
             cerr << "Cannot write page " << pageNum << endl;
 #endif
 			delete pageData;
-			delete fieldInfo;
             return -1;
         }
         rid.pageNum = pageNum;
@@ -135,20 +129,14 @@ RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector
     else
     {
         delete pageData;
-		delete fieldInfo;
         return 0;
     }
     delete pageData;
-	delete fieldInfo;
     return 1;
 }
 
-RC RecordBasedFileManager::addDataInNewPage(FileHandle &fileHandle, const vector<Attribute> &recordDescriptor, const void *data, RID &rid)
+RC RecordBasedFileManager::addDataInNewPage(FileHandle &fileHandle, const vector<Attribute> &recordDescriptor, const void *data, RID &rid, OffsetType &fieldInfoSize, char* &fieldInfo, OffsetType &dataSize)
 {
-	OffsetType dataSize;
-	OffsetType fieldInfoSize;
-	char* fieldInfo;
-	generateFieldInfo(recordDescriptor, data, fieldInfoSize, fieldInfo, dataSize);
 	OffsetType slotSize = sizeof(OffsetType) + fieldInfoSize + dataSize;
 	int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
 	OffsetType pageSize = sizeof(OffsetType) + slotSize;
@@ -168,49 +156,77 @@ RC RecordBasedFileManager::addDataInNewPage(FileHandle &fileHandle, const vector
         cerr << "Cannot append a page while insert a record" << endl;
 #endif
 		delete newData;
-		delete fieldInfo;
         return -1;
     }
     int totalPageNum = fileHandle.getNumberOfPages();
     rid.pageNum = totalPageNum - 1;
     rid.slotNum = sizeof(OffsetType);
     delete newData;
-	delete fieldInfo;
     return 0;
 }
 
 RC RecordBasedFileManager::insertRecord(FileHandle &fileHandle, const vector<Attribute> &recordDescriptor, const void *data, RID &rid) {
     int totalPageNum = fileHandle.getNumberOfPages();
+	OffsetType dataSize;
+	OffsetType fieldInfoSize;
+	char* fieldInfo;
+	generateFieldInfo(recordDescriptor, data, fieldInfoSize, fieldInfo, dataSize);
     if (totalPageNum == 0)
     {
-        RC status = addDataInNewPage(fileHandle, recordDescriptor, data, rid);
-        if (status == -1)
-            return -1;
+        RC status = addDataInNewPage(fileHandle, recordDescriptor, data, rid, fieldInfoSize, fieldInfo, dataSize);
+		if (status == -1)
+		{
+#ifdef DEBUG
+			cerr << "Cannot append a page while insert a record and PageNum = 0" << endl;
+#endif
+			delete fieldInfo;
+			return -1;
+		}
     }
     else
     {
-        RC status = appendDataInPage(fileHandle, recordDescriptor, totalPageNum - 1, data, rid);
-        if (status == -1)
-            return -1;
+        RC status = appendDataInPage(fileHandle, recordDescriptor, totalPageNum - 1, data, rid, fieldInfoSize, fieldInfo, dataSize);
+		if (status == -1)
+		{
+#ifdef DEBUG
+			cerr << "Cannot add data in the last page while insert a record" << endl;
+#endif
+			delete fieldInfo;
+			return -1;
+		}
         else if (status == 0)
         {
             for (int i = 0; i < totalPageNum - 1; i++)
             {
-                status = appendDataInPage(fileHandle, recordDescriptor, i, data, rid);
-                if (status == -1)
-                    return -1;
-                else if (status == 1)
-                    return 0;
+                status = appendDataInPage(fileHandle, recordDescriptor, i, data, rid, fieldInfoSize, fieldInfo, dataSize);
+				if (status == -1)
+				{
+#ifdef DEBUG
+					cerr << "Cannot add data in page " << i << " while insert a record" << endl;
+#endif
+					delete fieldInfo;
+					return -1;
+				}
+				else if (status == 1)
+				{
+					delete fieldInfo;
+					return 0;
+				}
             }
-        }
-        else if (status == 1)
-        {
-            status = addDataInNewPage(fileHandle, recordDescriptor, data, rid);
-            if (status == -1)
-                return -1;
-            return 0;
-        }    
+			status = addDataInNewPage(fileHandle, recordDescriptor, data, rid, fieldInfoSize, fieldInfo, dataSize);
+			if (status == -1)
+			{
+#ifdef DEBUG
+				cerr << "Cannot append a page while insert a record and all the other pages are full" << endl;
+#endif
+				delete fieldInfo;
+				return -1;
+			}
+			delete fieldInfo;
+			return 0;
+        }  
     }
+	delete fieldInfo;
     return 0;
 }
 
