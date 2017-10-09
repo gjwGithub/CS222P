@@ -62,6 +62,8 @@ public:
 
 	RC readMetaData(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount, PageNum &pageCount);
 	RC writeMetaData(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount, PageNum &pageCount);
+
+	RC generateAllPagesSize(vector<OffsetType> &allPagesSize);
 }; 
 
 #endif

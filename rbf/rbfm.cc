@@ -28,24 +28,7 @@ RC RecordBasedFileManager::destroyFile(const string &fileName) {
 
 RC RecordBasedFileManager::openFile(const string &fileName, FileHandle &fileHandle) {
 	RC status = PagedFileManager::instance()->openFile(fileName, fileHandle);
-	PageNum pageCountInAllPagesSize = this->allPagesSize.size();
-	for (PageNum i = 0; i < fileHandle.getNumberOfPages(); i++)
-	{
-		int status = fseek(fileHandle.getFile(), (i + 1) * PAGE_SIZE, SEEK_SET);
-		if (status)
-		{
-#ifdef DEBUG
-			cerr << "fseek error in reading meta data " << endl;
-#endif
-			return -1;
-		}
-		int pageSize = 0;
-		fread(&pageSize, 1, sizeof(OffsetType), fileHandle.getFile());
-		if (i < pageCountInAllPagesSize)
-			this->allPagesSize[i] = pageSize;
-		else
-			this->allPagesSize.push_back(pageSize);
-	}
+	status |= fileHandle.generateAllPagesSize(this->allPagesSize);
     return status;
 }
 
@@ -62,11 +45,11 @@ void RecordBasedFileManager::generateFieldInfo(const vector<Attribute> &recordDe
 	memcpy(nullFieldsIndicator, (char *)data + dataOffset, nullFieldsIndicatorActualSize);
 	dataOffset += nullFieldsIndicatorActualSize;
 
-	size_t fieldsNum = recordDescriptor.size();
+	OffsetType fieldsNum = recordDescriptor.size();
 	resultLength = sizeof(OffsetType) + fieldsNum * sizeof(OffsetType);
 	result = new char[resultLength];
 	OffsetType offset = 0;
-	memcpy(result + offset, &fieldsNum, sizeof(int));
+	memcpy(result + offset, &fieldsNum, sizeof(OffsetType));
 	offset += sizeof(OffsetType);
 	for (size_t i = 0; i < recordDescriptor.size(); i++)
 	{
@@ -267,12 +250,12 @@ RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const vector<Attri
 	OffsetType offset = slotNum;
 	memcpy(&slotSize, pageData + offset, sizeof(OffsetType));
 	offset += sizeof(OffsetType);
-	int fieldNum;
+	OffsetType fieldNum;
 	memcpy(&fieldNum, pageData + offset, sizeof(OffsetType));
 	offset += sizeof(OffsetType);
 	int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
 	unsigned char *nullFieldsIndicator = new unsigned char[nullFieldsIndicatorActualSize];
-	for (int i = 0; i < fieldNum; i += 8)
+	for (OffsetType i = 0; i < fieldNum; i += 8)
 	{
 		unsigned char nullFields = 0;
 		for (int j = 0; i + j < fieldNum && j < 8; j++)

@@ -453,3 +453,26 @@ RC FileHandle::writeMetaData(unsigned &readPageCount, unsigned &writePageCount, 
 	delete data;
 	return 0;
 }
+
+RC FileHandle::generateAllPagesSize(vector<OffsetType> &allPagesSize)
+{
+	PageNum pageCountInAllPagesSize = allPagesSize.size();
+	for (PageNum i = 0; i < this->pageCount; i++)
+	{
+		int status = fseek(this->file, (i + 1) * PAGE_SIZE, SEEK_SET);
+		if (status)
+		{
+#ifdef DEBUG
+			cerr << "fseek error in reading meta data " << endl;
+#endif
+			return -1;
+		}
+		int pageSize = 0;
+		fread(&pageSize, 1, sizeof(OffsetType), this->file);
+		if (i < pageCountInAllPagesSize)
+			allPagesSize[i] = pageSize;
+		else
+			allPagesSize.push_back(pageSize);
+	}
+	return 0;
+}
