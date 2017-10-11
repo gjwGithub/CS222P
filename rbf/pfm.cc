@@ -44,7 +44,6 @@ RC PagedFileManager::createFile(const string &fileName)
 	int appendPageCounter = 0;
 	PageNum pageNum = 0;
 	char* metaData = (char*)calloc(PAGE_SIZE, 1);
-	//memset(metaData, 0, PAGE_SIZE);
 	OffsetType offset = 0;
 	memcpy(metaData + offset, &readPageCounter, sizeof(int));
 	offset += sizeof(int);
