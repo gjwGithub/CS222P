@@ -11,9 +11,9 @@ gcc version : 4.8.4
 (1) In each slot of a record, first I use 2 bytes to store the size of this slot. Then I use 2 bytes to store the number of fields in this record (including the null fields). After that, I store a table of the offset of each field, which size is 2n bytes. If a field is null, its offset will be -1. In the end, I store the original data obtained from given data (excluding the null field indicator). As we know the offset of the nth field, we can access the nth field in O(1) time.
 A brief structure of record format design:
 0          2          4              6              8                           n
----------------------------------------------------------------------------------
-| slotSize | fieldNum | fieldOffset1 | fieldOffset2 |...| field1 | field2 | ... |
----------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------
+| slotSize | fieldNum | fieldOffset1 | fieldOffset2 | ... | field1 | field2 | ... |
+-----------------------------------------------------------------------------------
 |                                                       ^
 ---------------------- fieldOffset1 --------------------|
 (2) I use the same method as the one in given data to store a VarChar field. That is, first use a nameLength of 4 bytes to show how long is that string, and then store the content of that string continuously.

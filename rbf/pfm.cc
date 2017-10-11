@@ -34,6 +34,7 @@ RC PagedFileManager::createFile(const string &fileName)
 #ifdef DEBUG
 		cerr << "File exists!" << endl;
 #endif
+		fclose(file);
 		return -1;
     }
 
@@ -42,7 +43,8 @@ RC PagedFileManager::createFile(const string &fileName)
 	int writePageCounter = 0;
 	int appendPageCounter = 0;
 	PageNum pageNum = 0;
-	char* metaData = new char[sizeof(int) * 4];
+	char* metaData = (char*)calloc(PAGE_SIZE, 1);
+	//memset(metaData, 0, PAGE_SIZE);
 	OffsetType offset = 0;
 	memcpy(metaData + offset, &readPageCounter, sizeof(int));
 	offset += sizeof(int);
@@ -58,7 +60,7 @@ RC PagedFileManager::createFile(const string &fileName)
 #ifdef DEBUG
 		cerr << "Only write " << writeSize << " bytes, less than PAGE_SIZE " << PAGE_SIZE << " bytes in creating metadata " << pageNum << endl;
 #endif
-		delete metaData;
+		free(metaData);
 		return -1;
 	}
 	int status = fflush(file);
@@ -67,10 +69,10 @@ RC PagedFileManager::createFile(const string &fileName)
 #ifdef DEBUG
 		cerr << "Cannot flush the file while creating metadata" << endl;
 #endif
-		delete metaData;
+		free(metaData);
 		return -1;
 	}
-	delete metaData;
+	free(metaData);
 
 	status = fclose(file);
 	if (status)
@@ -382,13 +384,14 @@ RC FileHandle::readMetaData(unsigned &readPageCount, unsigned &writePageCount, u
 #endif
 		return -1;
 	}
-	char* data = new char[PAGE_SIZE];
+	char* data = (char*)malloc(PAGE_SIZE);
 	size_t readSize = fread(data, 1, PAGE_SIZE, this->file);
 	if (readSize != PAGE_SIZE)
 	{
 #ifdef DEBUG
 		cerr << "Only read " << readSize << " bytes, less than PAGE_SIZE " << PAGE_SIZE << " bytes in reading meta data " << endl;
 #endif
+		free(data);
 		return -1;
 	}
 
@@ -401,7 +404,7 @@ RC FileHandle::readMetaData(unsigned &readPageCount, unsigned &writePageCount, u
 	offset += sizeof(unsigned);
 	memcpy(&(this->pageCount), data + offset, sizeof(PageNum));
 	offset += sizeof(PageNum);
-	delete data;
+	free(data);
 	return 0;
 }
 
@@ -422,7 +425,7 @@ RC FileHandle::writeMetaData(unsigned &readPageCount, unsigned &writePageCount, 
 #endif
 		return -1;
 	}
-	char* data = new char[PAGE_SIZE];
+	char* data = (char*)calloc(PAGE_SIZE, 1);
 	OffsetType offset = 0;
 	memcpy(data + offset, &(this->readPageCounter), sizeof(unsigned));
 	offset += sizeof(unsigned);
@@ -438,7 +441,7 @@ RC FileHandle::writeMetaData(unsigned &readPageCount, unsigned &writePageCount, 
 #ifdef DEBUG
 		cerr << "Only write " << writeSize << " bytes, less than PAGE_SIZE " << PAGE_SIZE << " bytes in writing meta data " << endl;
 #endif
-		delete data;
+		free(data);
 		return -1;
 	}
 	status = fflush(this->file);
@@ -447,10 +450,10 @@ RC FileHandle::writeMetaData(unsigned &readPageCount, unsigned &writePageCount, 
 #ifdef DEBUG
 		cerr << "Cannot flush the file in writing meta data " << endl;
 #endif
-		delete data;
+		free(data);
 		return -1;
 	}
-	delete data;
+	free(data);
 	return 0;
 }
 
