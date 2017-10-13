@@ -132,6 +132,7 @@ public:
   RC addDataInNewPage(FileHandle &fileHandle, const vector<Attribute> &recordDescriptor, const void *data, RID &rid, OffsetType &fieldInfoSize, char* &fieldInfo, OffsetType &dataSize);
   void generateFieldInfo(const vector<Attribute> &recordDescriptor, const void *data, OffsetType &resultLength, char* &result, OffsetType &dataSize);
   OffsetType generateSlotTable(char* &data, OffsetType &slotCount);
+  void moveSlots(const OffsetType targetOffset, const OffsetType startSlot, const OffsetType endSlot, char* &pageData);
 
 protected:
   RecordBasedFileManager();
