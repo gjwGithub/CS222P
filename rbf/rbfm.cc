@@ -395,8 +395,7 @@ RC RecordBasedFileManager::deleteRecord(FileHandle &fileHandle, const vector<Att
 	OffsetType slotSize;
 	memcpy(&slotSize, pageData + slotOffset, sizeof(OffsetType));
 	//Decrease the size of page by target slot size
-	OffsetType pageSize;
-	memcpy(&pageSize, pageData, sizeof(OffsetType));
+	OffsetType pageSize = this->allPagesSize[pageNum];
 	pageSize -= slotSize;
 	memcpy(pageData, &pageSize, sizeof(OffsetType));
 	this->allPagesSize[pageNum] = pageSize;
@@ -406,12 +405,17 @@ RC RecordBasedFileManager::deleteRecord(FileHandle &fileHandle, const vector<Att
 	//Change the target slot offset into -1
 	slotOffset = -1;
 	memcpy(pageData + PAGE_SIZE - sizeof(OffsetType) * (slotNum + 2), &slotOffset, sizeof(OffsetType));
+	fileHandle.writePage(pageNum, pageData);
 	free(pageData);
 	return 0;
 }
 
 void RecordBasedFileManager::moveSlots(const OffsetType targetOffset, const OffsetType startSlot, const OffsetType endSlot, char* &pageData)
 {
+	OffsetType slotCount;
+	memcpy(&slotCount, pageData + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
+	if (startSlot > slotCount - 1)
+		return;
 	OffsetType startOffset;
 	memcpy(&startOffset, pageData + PAGE_SIZE - sizeof(OffsetType) * (startSlot + 2), sizeof(OffsetType));
 	OffsetType endOffset;
@@ -459,6 +463,61 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 	}
 	else if (oldSlotSize > newSlotSize)
 	{
-
+		OffsetType offset = slotOffset;
+		memcpy(pageData + offset, &newSlotSize, sizeof(OffsetType));
+		offset += sizeof(OffsetType);
+		memcpy(pageData + offset, fieldInfo, fieldInfoSize);
+		offset += fieldInfoSize;
+		int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
+		memcpy(pageData + offset, (char *)data + nullFieldsIndicatorActualSize, dataSize);
+		offset += dataSize;
+		OffsetType slotCount;
+		memcpy(&slotCount, pageData + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
+		moveSlots(offset, slotNum + 1, slotCount, pageData);
 	}
+	else
+	{
+		OffsetType newPageSize = this->allPagesSize[pageNum] + newSlotSize - oldSlotSize;
+		if (newPageSize <= PAGE_SIZE)
+		{
+			OffsetType slotEndOffset = slotOffset + newSlotSize;
+			OffsetType slotCount;
+			memcpy(&slotCount, pageData + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
+			moveSlots(slotEndOffset, slotNum + 1, slotCount, pageData);
+			OffsetType offset = slotOffset;
+			memcpy(pageData + offset, &newSlotSize, sizeof(OffsetType));
+			offset += sizeof(OffsetType);
+			memcpy(pageData + offset, fieldInfo, fieldInfoSize);
+			offset += fieldInfoSize;
+			int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
+			memcpy(pageData + offset, (char *)data + nullFieldsIndicatorActualSize, dataSize);
+		}
+		else
+		{
+			RID newRid;
+			RC status = insertRecord(fileHandle, recordDescriptor, data, newRid);
+			if (status == -1)
+			{
+#ifdef DEBUG
+				cerr << "Cannot insert a record into another page when updating a record exceeds the size of page" << endl;
+#endif
+				free(pageData);
+				return -1;
+			}
+			OffsetType offset = slotOffset;
+			OffsetType tombStoneMark = -1;
+			memcpy(pageData + offset, &tombStoneMark, sizeof(OffsetType));
+			offset += sizeof(OffsetType);
+			memcpy(pageData + offset, &(newRid.pageNum), sizeof(PageNum));
+			offset += sizeof(PageNum);
+			memcpy(pageData + offset, &(newRid.slotNum), sizeof(PageNum));
+			offset += sizeof(OffsetType);
+			OffsetType slotCount;
+			memcpy(&slotCount, pageData + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
+			moveSlots(offset, slotNum + 1, slotCount, pageData);
+		}
+	}
+	fileHandle.writePage(pageNum, pageData);
+	free(pageData);
+	return 0;
 }
