@@ -133,6 +133,7 @@ public:
   void generateFieldInfo(const vector<Attribute> &recordDescriptor, const void *data, OffsetType &resultLength, char* &result, OffsetType &dataSize);
   OffsetType generateSlotTable(char* &data, OffsetType &slotCount);
   void moveSlots(const OffsetType targetOffset, const OffsetType startSlot, const OffsetType endSlot, char* &pageData);
+  RC toFinalSlot(FileHandle &fileHandle, const RID &fromSlot, RID &finalSlot, char* &finalPage);
 
 protected:
   RecordBasedFileManager();
