@@ -594,3 +594,61 @@ RC RecordBasedFileManager::toFinalSlot(FileHandle &fileHandle, const RID &fromSl
 	finalSlot.slotNum = currentSlotNum;
 	return 0;
 }
+
+RC RecordBasedFileManager::readAttribute(FileHandle &fileHandle, const vector<Attribute> &recordDescriptor, const RID &rid, const string &attributeName, void *data)
+{
+	RID finalRid;
+	char* finalPage;
+	RC status = toFinalSlot(fileHandle, rid, finalRid, finalPage);
+	if (status == -1)
+	{
+#ifdef DEBUG
+		cerr << "Cannot traverse to final slot when updating record." << endl;
+#endif
+		free(finalPage);
+		return -1;
+	}
+	PageNum pageNum = finalRid.pageNum;
+	unsigned int slotNum = finalRid.slotNum;
+
+	for (size_t i = 0; i < recordDescriptor.size(); i++)
+	{
+		if (recordDescriptor[i].name == attributeName)
+		{
+			OffsetType slotOffset;
+			memcpy(&slotOffset, finalPage + PAGE_SIZE - sizeof(OffsetType) * (slotNum + 2), sizeof(OffsetType));
+			OffsetType attrOffset;
+			memcpy(&attrOffset, finalPage + slotOffset + sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
+			if (attrOffset != -1)
+			{
+				OffsetType attrLength;
+				if (i == recordDescriptor.size() - 1)
+				{
+					OffsetType slotSize;
+					memcpy(&slotSize, finalPage + slotOffset, sizeof(OffsetType));
+					attrLength = slotOffset + slotSize - attrOffset;
+				}
+				else
+				{
+					OffsetType nextAttrOffset;
+					memcpy(&attrOffset, finalPage + slotOffset + sizeof(OffsetType) * (i + 1 + 2), sizeof(OffsetType));
+					attrLength = nextAttrOffset - attrOffset;
+				}
+				memcpy(data, finalPage + attrOffset, attrLength);
+			}
+			else
+			{
+#ifdef DEBUG
+				cerr << "The attribute name " << attributeName << " contains null value" << endl;
+#endif
+			}
+			free(finalPage);
+			return 0;
+		}
+	}
+#ifdef DEBUG
+	cerr << "Cannot find the attribute name " << attributeName << endl;
+#endif
+	free(finalPage);
+	return -1;
+}
