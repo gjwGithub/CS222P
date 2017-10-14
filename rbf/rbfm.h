@@ -64,7 +64,32 @@ public:
   // a satisfying record needs to be fetched from the file.
   // "data" follows the same format as RecordBasedFileManager::insertRecord().
   RC getNextRecord(RID &rid, void *data) { return RBFM_EOF; };
-  RC close() { return -1; };
+  RC close() { end = true; return 0; }
+
+  PageNum currentPageNum;
+  OffsetType currentSlotNum;
+
+  void setMaxPageNum(PageNum maxPageNum) { this->maxPageNum = maxPageNum; }
+  void setMaxSlotNum(OffsetType maxSlotNum) { this->maxSlotNum = maxSlotNum; }
+  bool getEnd() { return end; }
+  void setEnd(bool end) { this->end = end; }
+  void setRecordDescriptor(const vector<Attribute> &recordDescriptor) { this->recordDescriptor = &recordDescriptor; }
+  void setConditionAttribute(const string &conditionAttribute) { this->conditionAttribute = &conditionAttribute; }
+  void setCompOp(const CompOp &compOp) { this->compOp = &compOp; }
+  void setValue(const void* &value) { this->value = &value; }
+  void setAttributeNames(const vector<string> &attributeNames) { this->attributeNames = &attributeNames; }
+
+private:
+	PageNum maxPageNum;
+	OffsetType maxSlotNum;
+	bool end;
+
+	FileHandle* fileHandle;
+	const vector<Attribute>* recordDescriptor;
+	const string* conditionAttribute;
+	const CompOp* compOp;
+	const void **value;
+	const vector<string>* attributeNames;
 };
 
 

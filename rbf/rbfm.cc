@@ -448,6 +448,12 @@ void RecordBasedFileManager::moveSlots(const OffsetType targetOffset, const Offs
 		currentSlotOffset += deltaOffset;
 		memcpy(pageData + PAGE_SIZE - sizeof(OffsetType) * (i + 2), &currentSlotOffset, sizeof(OffsetType));
 	}
+
+	//Change total size of the page
+	OffsetType pageSize;
+	memcpy(&pageSize, pageData, sizeof(OffsetType));
+	pageSize += deltaOffset;
+	memcpy(pageData, &pageSize, sizeof(OffsetType));
 }
 
 RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Attribute> &recordDescriptor, const void *data, const RID &rid)
@@ -651,4 +657,28 @@ RC RecordBasedFileManager::readAttribute(FileHandle &fileHandle, const vector<At
 #endif
 	free(finalPage);
 	return -1;
+}
+
+RC RecordBasedFileManager::scan(FileHandle &fileHandle,
+	const vector<Attribute> &recordDescriptor,
+	const string &conditionAttribute,
+	const CompOp compOp,                  // comparision type such as "<" and "="
+	const void *value,                    // used in the comparison
+	const vector<string> &attributeNames, // a list of projected attributes
+	RBFM_ScanIterator &rbfm_ScanIterator)
+{
+	rbfm_ScanIterator.setEnd(false);
+	rbfm_ScanIterator.setRecordDescriptor(recordDescriptor);
+	rbfm_ScanIterator.setConditionAttribute(conditionAttribute);
+	rbfm_ScanIterator.setCompOp(compOp);
+	rbfm_ScanIterator.setValue(value);
+	rbfm_ScanIterator.setAttributeNames(attributeNames);
+	rbfm_ScanIterator.currentPageNum = 0;
+	rbfm_ScanIterator.currentSlotNum = 0;
+	rbfm_ScanIterator.setMaxPageNum(this->allPagesSize.size() - 1);
+	char* lastPageData;
+	fileHandle.readPage(this->allPagesSize.size() - 1, lastPageData);
+	OffsetType slotCount;
+	memcpy(&slotCount, lastPageData + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
+	rbfm_ScanIterator.setMaxSlotNum(slotCount);
 }
