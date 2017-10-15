@@ -63,33 +63,32 @@ public:
   // Never keep the results in the memory. When getNextRecord() is called, 
   // a satisfying record needs to be fetched from the file.
   // "data" follows the same format as RecordBasedFileManager::insertRecord().
-  RC getNextRecord(RID &rid, void *data) { return RBFM_EOF; };
+  RC getNextRecord(RID &rid, void *data);
   RC close() { end = true; return 0; }
 
   PageNum currentPageNum;
   OffsetType currentSlotNum;
 
   void setMaxPageNum(PageNum maxPageNum) { this->maxPageNum = maxPageNum; }
-  void setMaxSlotNum(OffsetType maxSlotNum) { this->maxSlotNum = maxSlotNum; }
   bool getEnd() { return end; }
   void setEnd(bool end) { this->end = end; }
-  void setRecordDescriptor(const vector<Attribute> &recordDescriptor) { this->recordDescriptor = &recordDescriptor; }
-  void setConditionAttribute(const string &conditionAttribute) { this->conditionAttribute = &conditionAttribute; }
+  vector<OffsetType>* getOutputFields() { return &(this->outputFields); }
+  void setConditionField(OffsetType conditionField) { this->setConditionField = conditionField; }
   void setCompOp(const CompOp &compOp) { this->compOp = &compOp; }
   void setValue(const void* &value) { this->value = &value; }
-  void setAttributeNames(const vector<string> &attributeNames) { this->attributeNames = &attributeNames; }
+  void setRecordDescriptor(const vector<Attribute> &recordDescriptor) { this->recordDescriptor = &recordDescriptor; }
+  void setFileHandle(FileHandle &fileHandle) { this->fileHandle = &fileHandle; }
 
 private:
 	PageNum maxPageNum;
-	OffsetType maxSlotNum;
 	bool end;
 
 	FileHandle* fileHandle;
 	const vector<Attribute>* recordDescriptor;
-	const string* conditionAttribute;
+	vector<OffsetType> outputFields;
+	OffsetType conditionField;
 	const CompOp* compOp;
 	const void **value;
-	const vector<string>* attributeNames;
 };
 
 

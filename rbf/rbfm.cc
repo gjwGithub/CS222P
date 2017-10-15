@@ -392,9 +392,6 @@ RC RecordBasedFileManager::deleteRecord(FileHandle &fileHandle, const vector<Att
 		free(finalPage);
 		return -1;
 	}
-	//Decrease the number of slots by 1
-	--slotCount;
-	memcpy(finalPage + PAGE_SIZE - sizeof(OffsetType), &slotCount, sizeof(OffsetType));
 	//Get offset and size of target slot
 	OffsetType slotOffset;
 	memcpy(&slotOffset, finalPage + PAGE_SIZE - sizeof(OffsetType) * (slotNum + 2), sizeof(OffsetType));
@@ -406,8 +403,8 @@ RC RecordBasedFileManager::deleteRecord(FileHandle &fileHandle, const vector<Att
 	memcpy(finalPage, &pageSize, sizeof(OffsetType));
 	this->allPagesSize[pageNum] = pageSize;
 	//Move forward other slots if target slot is not the last one
-	if (slotNum < slotCount)
-		moveSlots(slotOffset, slotNum + 1, slotCount, finalPage);
+	if (slotNum < slotCount - 1)
+		moveSlots(slotOffset, slotNum + 1, slotCount - 1, finalPage);
 	//Change the target slot offset into -1
 	slotOffset = -1;
 	memcpy(finalPage + PAGE_SIZE - sizeof(OffsetType) * (slotNum + 2), &slotOffset, sizeof(OffsetType));
@@ -571,6 +568,7 @@ RC RecordBasedFileManager::toFinalSlot(FileHandle &fileHandle, const RID &fromSl
 #ifdef DEBUG
 		cerr << "Cannot read page " << currentPageNum << " when traversing to final slot." << endl;
 #endif
+		finalPage = currentPage;
 		return -1;
 	}
 	while (1)
@@ -589,6 +587,7 @@ RC RecordBasedFileManager::toFinalSlot(FileHandle &fileHandle, const RID &fromSl
 #ifdef DEBUG
 				cerr << "Cannot read page " << currentPageNum << " when traversing to final slot." << endl;
 #endif
+				finalPage = currentPage;
 				return -1;
 			}
 		}
@@ -609,7 +608,7 @@ RC RecordBasedFileManager::readAttribute(FileHandle &fileHandle, const vector<At
 	if (status == -1)
 	{
 #ifdef DEBUG
-		cerr << "Cannot traverse to final slot when updating record." << endl;
+		cerr << "Cannot traverse to final slot when reading attributes of record." << endl;
 #endif
 		free(finalPage);
 		return -1;
@@ -668,17 +667,156 @@ RC RecordBasedFileManager::scan(FileHandle &fileHandle,
 	RBFM_ScanIterator &rbfm_ScanIterator)
 {
 	rbfm_ScanIterator.setEnd(false);
-	rbfm_ScanIterator.setRecordDescriptor(recordDescriptor);
-	rbfm_ScanIterator.setConditionAttribute(conditionAttribute);
 	rbfm_ScanIterator.setCompOp(compOp);
 	rbfm_ScanIterator.setValue(value);
-	rbfm_ScanIterator.setAttributeNames(attributeNames);
 	rbfm_ScanIterator.currentPageNum = 0;
 	rbfm_ScanIterator.currentSlotNum = 0;
 	rbfm_ScanIterator.setMaxPageNum(this->allPagesSize.size() - 1);
-	char* lastPageData;
-	fileHandle.readPage(this->allPagesSize.size() - 1, lastPageData);
-	OffsetType slotCount;
-	memcpy(&slotCount, lastPageData + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
-	rbfm_ScanIterator.setMaxSlotNum(slotCount);
+	rbfm_ScanIterator.setConditionField(-1);
+	rbfm_ScanIterator.setFileHandle(fileHandle);
+	rbfm_ScanIterator.setRecordDescriptor(recordDescriptor);
+
+	vector<OffsetType>* outputFields = rbfm_ScanIterator.getOutputFields();
+	bool findOutputField = false;
+	for (size_t i = 0; i < recordDescriptor.size(); i++)
+	{
+		//Get the id of condition field
+		if (recordDescriptor[i].name == conditionAttribute)
+			rbfm_ScanIterator.setConditionField((OffsetType)i);
+		for (size_t j = 0; j < attributeNames.size(); j++)
+		{
+			//Add the id of the field that we need to project
+			if (recordDescriptor[i].name == attributeNames[j])
+			{
+				outputFields->push_back(i);
+				findOutputField = true;
+				break;
+			}
+		}
+	}
+	if (!findOutputField)
+	{
+#ifdef DEBUG
+		cerr << "Cannot find the output fields when scanning" << endl;
+#endif
+		return -1;
+	}
+	return 0;
+}
+
+RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
+{
+	if (!end)
+	{
+		for (PageNum i = currentPageNum; i < maxPageNum; i++)
+		{
+			char* pageData = (char*)malloc(PAGE_SIZE);
+			RC status = fileHandle->readPage(i, pageData);
+			if (status == -1)
+			{
+#ifdef DEBUG
+				cerr << "Cannot read page " << i << " when getting the next record." << endl;
+#endif
+				free(pageData);
+				return -1;
+			}
+			OffsetType slotCount;
+			memcpy(&slotCount, pageData + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
+			OffsetType startSlot = 0;
+			//If in the same page as last time
+			if (i == currentPageNum)
+				startSlot = currentSlotNum + 1;
+			//If last time we reached the last slot of the page, then go to the next page
+			if (startSlot >= slotCount)
+				continue;
+			for (OffsetType j = 0; j < slotCount; j++)
+			{
+				OffsetType slotOffset;
+				memcpy(&slotOffset, pageData + PAGE_SIZE - sizeof(OffsetType) * (j + 2), sizeof(OffsetType));
+				//Whether the slot has been deleted
+				if (slotOffset != -1)
+				{
+					OffsetType slotSize;
+					memcpy(&slotSize, pageData + slotOffset, sizeof(OffsetType));
+					//Whether the slot is a tomb stone
+					if (slotSize != -1)
+					{
+						//Whether the query has a condition
+						//If it has a condition and does not satisfy the condition, we will continue the loop and go to the next record
+						if (conditionField != -1)
+						{
+							OffsetType conditionOffset;
+							memcpy(&conditionOffset, pageData + slotOffset + sizeof(OffsetType) * (2 + conditionField), sizeof(OffsetType));
+							AttrType conditionType = recordDescriptor->at(conditionField).type;
+							int compResult;
+							if (conditionType == TypeInt)
+							{
+								compResult = memcmp(pageData + slotOffset + conditionOffset, *value, sizeof(int));
+							}
+							else if (conditionType == TypeReal)
+							{
+								compResult = memcmp(pageData + slotOffset + conditionOffset, *value, sizeof(float));
+							}
+							else if (conditionType == TypeVarChar)
+							{
+								int strLength;
+								memcpy(&strLength, pageData + slotOffset + conditionOffset, sizeof(int));
+								compResult = memcmp(pageData + slotOffset + conditionOffset + sizeof(int), *value, strLength);
+							}
+							if (compResult < 0 && (*compOp == GT_OP || *compOp == GE_OP || *compOp == EQ_OP))
+								continue;
+							if (compResult == 0 && *compOp != EQ_OP)
+								continue;
+							if (compResult > 0 && (*compOp == LT_OP || *compOp != LE_OP || *compOp == EQ_OP))
+								continue;
+						}
+						//Get all the projected fields in the record and combine them
+						int nullFieldsIndicatorActualSize = ceil((double)outputFields.size() / CHAR_BIT);
+						unsigned char *nullFieldsIndicator = (unsigned char*)malloc(nullFieldsIndicatorActualSize);
+						unsigned char nullFields = 0;
+						OffsetType dataOffset = nullFieldsIndicatorActualSize;
+						for (size_t k = 0; k < outputFields.size(); k++)
+						{
+							if (nullFields % 8 == 0)
+								nullFields = 0;
+							OffsetType fieldOffset;
+							memcpy(&fieldOffset, pageData + slotOffset + sizeof(OffsetType) * (2 + k), sizeof(OffsetType));
+							if (fieldOffset == -1)
+							{
+								nullFields += 1 << (7 - k % 8);
+							}
+							else
+							{
+								AttrType attrType = recordDescriptor->at(outputFields[k]).type;
+								int fieldLength = 0;
+								if (attrType == TypeInt)
+									fieldLength = sizeof(int);
+								else if (attrType == TypeReal)
+									fieldLength = sizeof(float);
+								else if (attrType == TypeVarChar)
+								{
+									memcpy(&fieldLength, pageData + slotOffset + fieldOffset, sizeof(int));
+									fieldLength += sizeof(int);
+								}
+								memcpy((char*)data + dataOffset, pageData + slotOffset + fieldOffset, fieldLength);
+								dataOffset += fieldLength;
+							}
+							nullFieldsIndicator[k / 8] = nullFields;
+						}
+						memcpy((char*)data, nullFieldsIndicator, nullFieldsIndicatorActualSize);
+						currentPageNum = i;
+						currentSlotNum = j;
+						rid.pageNum = currentPageNum;
+						rid.slotNum = currentSlotNum;
+						free(nullFieldsIndicator);
+						free(pageData);
+						return 0;
+					}
+				}
+			}
+			free(pageData);
+		}
+		end = true;
+	}
+	return RBFM_EOF;
 }
