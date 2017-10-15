@@ -436,29 +436,14 @@ void RecordBasedFileManager::moveSlots(const OffsetType targetOffset, const Offs
 	endOffset += endSlotSize;
 
 	OffsetType moveLength = endOffset - startOffset;
-	memcpy(pageData + targetOffset, pageData + startOffset, moveLength);
+	memmove(pageData + targetOffset, pageData + startOffset, moveLength);
 	OffsetType deltaOffset = targetOffset - startOffset;
-	//Move forward
-	if (deltaOffset < 0)
+	for (OffsetType i = startSlot; i <= endSlot; i++)
 	{
-		for (OffsetType i = startSlot; i <= endSlot; i++)
-		{
-			OffsetType currentSlotOffset;
-			memcpy(&currentSlotOffset, pageData + PAGE_SIZE - sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
-			currentSlotOffset += deltaOffset;
-			memcpy(pageData + PAGE_SIZE - sizeof(OffsetType) * (i + 2), &currentSlotOffset, sizeof(OffsetType));
-		}
-	}
-	//Move backward
-	else
-	{
-		for (OffsetType i = endSlot; i >= startSlot; i--)
-		{
-			OffsetType currentSlotOffset;
-			memcpy(&currentSlotOffset, pageData + PAGE_SIZE - sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
-			currentSlotOffset += deltaOffset;
-			memcpy(pageData + PAGE_SIZE - sizeof(OffsetType) * (i + 2), &currentSlotOffset, sizeof(OffsetType));
-		}
+		OffsetType currentSlotOffset;
+		memcpy(&currentSlotOffset, pageData + PAGE_SIZE - sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
+		currentSlotOffset += deltaOffset;
+		memcpy(pageData + PAGE_SIZE - sizeof(OffsetType) * (i + 2), &currentSlotOffset, sizeof(OffsetType));
 	}
 
 	//Change total size of the page
