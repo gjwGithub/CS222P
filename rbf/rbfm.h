@@ -73,9 +73,9 @@ public:
   bool getEnd() { return end; }
   void setEnd(bool end) { this->end = end; }
   vector<OffsetType>* getOutputFields() { return &(this->outputFields); }
-  void setConditionField(OffsetType conditionField) { this->setConditionField = conditionField; }
-  void setCompOp(const CompOp &compOp) { this->compOp = &compOp; }
-  void setValue(const void* &value) { this->value = &value; }
+  void setConditionField(OffsetType conditionField) { this->conditionField = conditionField; }
+  void setCompOp(const CompOp compOp) { this->compOp = &compOp; }
+  void setValue(const void* value) { this->value = value; }
   void setRecordDescriptor(const vector<Attribute> &recordDescriptor) { this->recordDescriptor = &recordDescriptor; }
   void setFileHandle(FileHandle &fileHandle) { this->fileHandle = &fileHandle; }
 
@@ -88,7 +88,7 @@ private:
 	vector<OffsetType> outputFields;
 	OffsetType conditionField;
 	const CompOp* compOp;
-	const void **value;
+	const void *value;
 };
 
 

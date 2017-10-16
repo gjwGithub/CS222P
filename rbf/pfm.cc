@@ -144,7 +144,7 @@ RC PagedFileManager::openFile(const string &fileName, FileHandle &fileHandle)
 	{ 
 		fileHandle.setFile(file);
     }
-	RC status = fileHandle.readMetaData(fileHandle.readPageCounter, fileHandle.writePageCounter, fileHandle.appendPageCounter, fileHandle.pageCount);
+	RC status = fileHandle.readMetaData();
 	if (status == -1)
 	{
 #ifdef DEBUG
@@ -235,8 +235,8 @@ RC FileHandle::readPage(PageNum pageNum, void *data)
 #endif
 		return -1;
 	}
-    ++readPageCounter;
-	status = writeMetaData(this->readPageCounter, this->writePageCounter, this->appendPageCounter, this->pageCount);
+    ++(this->readPageCounter);
+	status = writeMetaData();
 	if (status == -1)
 	{
 #ifdef DEBUG
@@ -290,7 +290,7 @@ RC FileHandle::writePage(PageNum pageNum, const void *data)
 		return -1;
 	}
     ++writePageCounter;
-	status = writeMetaData(this->readPageCounter, this->writePageCounter, this->appendPageCounter, this->pageCount);
+	status = writeMetaData();
 	if (status == -1)
 	{
 #ifdef DEBUG
@@ -329,7 +329,7 @@ RC FileHandle::appendPage(const void *data)
 	}
 	++appendPageCounter;
 	++(this->pageCount);
-	status = writeMetaData(this->readPageCounter, this->writePageCounter, this->appendPageCounter, this->pageCount);
+	status = writeMetaData();
 	if (status == -1)
 	{
 #ifdef DEBUG
@@ -366,7 +366,7 @@ FILE* FileHandle::getFile()
     return this->file;
 }
 
-RC FileHandle::readMetaData(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount, PageNum &pageCount)
+RC FileHandle::readMetaData()
 {
 	if (!this->file)
 	{
@@ -407,7 +407,7 @@ RC FileHandle::readMetaData(unsigned &readPageCount, unsigned &writePageCount, u
 	return 0;
 }
 
-RC FileHandle::writeMetaData(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount, PageNum &pageCount)
+RC FileHandle::writeMetaData()
 {
 	if (!this->file)
 	{

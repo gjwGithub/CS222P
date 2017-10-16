@@ -708,7 +708,7 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 {
 	if (!end)
 	{
-		for (PageNum i = currentPageNum; i < maxPageNum; i++)
+		for (PageNum i = currentPageNum; i <= maxPageNum; i++)
 		{
 			char* pageData = (char*)malloc(PAGE_SIZE);
 			RC status = fileHandle->readPage(i, pageData);
@@ -726,10 +726,7 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 			//If in the same page as last time
 			if (i == currentPageNum)
 				startSlot = currentSlotNum + 1;
-			//If last time we reached the last slot of the page, then go to the next page
-			if (startSlot >= slotCount)
-				continue;
-			for (OffsetType j = 0; j < slotCount; j++)
+			for (OffsetType j = startSlot; j < slotCount; j++)
 			{
 				OffsetType slotOffset;
 				memcpy(&slotOffset, pageData + PAGE_SIZE - sizeof(OffsetType) * (j + 2), sizeof(OffsetType));
@@ -751,17 +748,17 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 							int compResult;
 							if (conditionType == TypeInt)
 							{
-								compResult = memcmp(pageData + slotOffset + conditionOffset, *value, sizeof(int));
+								compResult = memcmp(pageData + slotOffset + conditionOffset, value, sizeof(int));
 							}
 							else if (conditionType == TypeReal)
 							{
-								compResult = memcmp(pageData + slotOffset + conditionOffset, *value, sizeof(float));
+								compResult = memcmp(pageData + slotOffset + conditionOffset, value, sizeof(float));
 							}
 							else if (conditionType == TypeVarChar)
 							{
 								int strLength;
 								memcpy(&strLength, pageData + slotOffset + conditionOffset, sizeof(int));
-								compResult = memcmp(pageData + slotOffset + conditionOffset + sizeof(int), *value, strLength);
+								compResult = memcmp(pageData + slotOffset + conditionOffset + sizeof(int), value, strLength);
 							}
 							if (compResult < 0 && (*compOp == GT_OP || *compOp == GE_OP || *compOp == EQ_OP))
 								continue;

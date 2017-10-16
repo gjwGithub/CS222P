@@ -60,8 +60,8 @@ public:
     unsigned getNumberOfPages();                                          // Get the number of pages in the file
     RC collectCounterValues(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount);  // Put the current counter values into variables
 
-	RC readMetaData(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount, PageNum &pageCount);
-	RC writeMetaData(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount, PageNum &pageCount);
+	RC readMetaData();
+	RC writeMetaData();
 
 	RC generateAllPagesSize(vector<OffsetType> &allPagesSize);
 }; 
