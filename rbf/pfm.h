@@ -63,6 +63,7 @@ public:
 	RC readMetaData();
 	RC writeMetaData();
 
+	vector<OffsetType> allPagesSize;
 	RC generateAllPagesSize(vector<OffsetType> &allPagesSize);
 }; 
 
