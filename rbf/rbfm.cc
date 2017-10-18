@@ -257,7 +257,7 @@ RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const vector<Attri
 		return -1;
 	}
 	unsigned int slotNum = finalRid.slotNum;
-	
+
 	OffsetType slotCount;
 	memcpy(&slotCount, pageData + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
 	if ((OffsetType)slotNum >= slotCount)
@@ -270,6 +270,14 @@ RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const vector<Attri
 	}
 	OffsetType offset;
 	memcpy(&offset, pageData + PAGE_SIZE - sizeof(OffsetType) * (slotNum + 2), sizeof(OffsetType));
+	if (offset == -1)
+	{
+#ifdef DEBUG
+		cerr << "Reading a deleted record pageNum = " << finalRid.pageNum << " slotNum = " << slotNum << endl;
+#endif
+		free(pageData);
+		return -1;
+	}
 	OffsetType startOffset = offset;
 
 	OffsetType slotSize;
