@@ -54,14 +54,15 @@ int RBFTest_Delete(RecordBasedFileManager *rbfm)
 	memset(nullsIndicator, 0, nullFieldsIndicatorActualSize);
 
 	// Insert a record into a file and print the record
-	prepareRecord(recordDescriptor.size(), nullsIndicator, 8, "", 25, 177.8, 6200, record,
+	prepareRecord(recordDescriptor.size(), nullsIndicator, 8, "Testcase", 25, 177.8, 6200, record,
 			&recordSize);
 	cout << endl << "Inserting Data:" << endl;
 	rbfm->printRecord(recordDescriptor, record);
 
 	rc = rbfm->insertRecord(fileHandle, recordDescriptor, record, rid);
 	assert(rc == success && "Inserting a record should not fail.");
-
+	// save the returned RID
+	RID rid0 = rid;
 	cout << endl;
 
 	memset(nullsIndicator, 0, nullFieldsIndicatorActualSize);
@@ -69,39 +70,39 @@ int RBFTest_Delete(RecordBasedFileManager *rbfm)
 	// Insert a record into a file and print the record
 
 	nullsIndicator[0] = 128;
-	prepareRecord(recordDescriptor.size(), nullsIndicator, 8, "", 25, 177.8, 6200, record,
+	prepareRecord(recordDescriptor.size(), nullsIndicator, 0, "", 25, 177.8, 6200, record,
 			&recordSize);
 	cout << endl << "Inserting Data:" << endl;
 	rbfm->printRecord(recordDescriptor, record);
 
 	rc = rbfm->insertRecord(fileHandle, recordDescriptor, record, rid);
 	assert(rc == success && "Inserting a record should not fail.");
+	// save the returned RID
+	RID rid1 = rid;
 
 	cout << endl << "Inserting Data:" << endl;
 	rbfm->printRecord(recordDescriptor, record);
 
 	rc = rbfm->insertRecord(fileHandle, recordDescriptor, record, rid);
 	assert(rc == success && "Inserting a record should not fail.");
-
+	// save the returned RID
+	RID rid2 = rid;
 	cout << endl << "Inserting Data:" << endl;
 	rbfm->printRecord(recordDescriptor, record);
 
 	rc = rbfm->insertRecord(fileHandle, recordDescriptor, record, rid);
+	// save the returned RID
+	RID rid3 = rid;
 	assert(rc == success && "Inserting a record should not fail.");
 
-	unsigned slotNum = rid.slotNum;
-	rid.slotNum = 0;
-
-	rc = rbfm->deleteRecord(fileHandle, recordDescriptor, rid);
+	rc = rbfm->deleteRecord(fileHandle, recordDescriptor, rid0);
 	assert(rc == success && "Deleting a record should not fail.");
 
-	rc = rbfm->readRecord(fileHandle, recordDescriptor, rid, returnedData);
+	rc = rbfm->readRecord(fileHandle, recordDescriptor, rid0, returnedData);
 	assert(rc != success && "Reading a deleted record should fail.");
 
-	rid.slotNum = slotNum - 1;
-
 	// Given the rid, read the record from file
-	rc = rbfm->readRecord(fileHandle, recordDescriptor, rid, returnedData);
+	rc = rbfm->readRecord(fileHandle, recordDescriptor, rid1, returnedData);
 	assert(rc == success && "Reading a record should not fail.");
 
 	cout << endl << "Returned Data:" << endl;
@@ -118,7 +119,7 @@ int RBFTest_Delete(RecordBasedFileManager *rbfm)
 
 	rc = rbfm->insertRecord(fileHandle, recordDescriptor, record, rid);
 	assert(rc == success && "Inserting a record should not fail.");
-	assert(rid.slotNum == 0 && "Inserted record should use previous deleted slot.");
+	assert(rid.slotNum == rid0.slotNum && "Inserted record should use previous deleted slot.");
 
 	// Given the rid, read the record from file
 	rc = rbfm->readRecord(fileHandle, recordDescriptor, rid, returnedData);

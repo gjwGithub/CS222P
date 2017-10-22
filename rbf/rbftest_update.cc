@@ -82,6 +82,7 @@ int RBFTest_Update(RecordBasedFileManager *rbfm)
 
 	RID rid;
 	createRecordDescriptor(recordDescriptor);
+	recordDescriptor[0].length = (AttrLength)1000;
 
 	string longstr;
 	for (int i = 0; i < 1000; i++)
