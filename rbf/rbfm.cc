@@ -95,7 +95,7 @@ RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector
 	++fileHandle.readPageCounter;
 
 	OffsetType slotSize = sizeof(OffsetType) + fieldInfoSize + dataSize; // slotSizeNumber + fieldInfoSize + dataSize
-	OffsetType newPageSize = oldPageSize + slotSize + sizeof(OffsetType);
+	OffsetType newPageSize = oldPageSize + slotSize + sizeof(OffsetType); // In fact newPageSize would be oldPageSize + slotSize, if we decide to reuse a previous deleted slot
     if (newPageSize <= PAGE_SIZE)
     {
 		char *pageData = (char*)malloc(PAGE_SIZE);
@@ -109,20 +109,43 @@ RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector
 			return -1;
 		}
 
-		OffsetType slotCount;
-		memcpy(&slotCount, pageData + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
-		OffsetType newSlotTableSize = generateSlotTable(pageData, slotCount);
-		OffsetType oldSlotTableSize = newSlotTableSize - sizeof(OffsetType);
-		fileHandle.allPagesSize[pageNum] = newPageSize;
-		int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
-		OffsetType offset = 0;
-        memcpy(pageData + offset, &newPageSize, sizeof(OffsetType));
-        offset += oldPageSize - oldSlotTableSize;
-        memcpy(pageData + offset, &slotSize, sizeof(OffsetType));
-        offset += sizeof(OffsetType);
-		memcpy(pageData + offset, fieldInfo, fieldInfoSize);
-		offset += fieldInfoSize;
-        memcpy(pageData + offset, (char *)data + nullFieldsIndicatorActualSize, dataSize);
+		OffsetType oldSlotCount;
+		memcpy(&oldSlotCount, pageData + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
+		OffsetType targetSlot = generateSlotTable(pageData, oldSlotCount, slotSize);
+		OffsetType newSlotCount;
+		memcpy(&newSlotCount, pageData + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
+		OffsetType newSlotTableSize = (newSlotCount + 1) * sizeof(OffsetType);
+		OffsetType oldSlotTableSize = (oldSlotCount + 1) * sizeof(OffsetType);
+		if (newSlotTableSize != oldSlotTableSize)
+		{
+			//If we add a new slot in the end of the table
+			fileHandle.allPagesSize[pageNum] = newPageSize;
+			int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
+			OffsetType offset = 0;
+			memcpy(pageData + offset, &newPageSize, sizeof(OffsetType));
+			offset += oldPageSize - oldSlotTableSize;
+			memcpy(pageData + offset, &slotSize, sizeof(OffsetType));
+			offset += sizeof(OffsetType);
+			memcpy(pageData + offset, fieldInfo, fieldInfoSize);
+			offset += fieldInfoSize;
+			memcpy(pageData + offset, (char *)data + nullFieldsIndicatorActualSize, dataSize);
+		}
+		else
+		{
+			//If we reuse a previous deleted slot
+			fileHandle.allPagesSize[pageNum] = newPageSize - sizeof(OffsetType); //Since we didn't change the size of slot table
+			OffsetType targetSlotOffset;
+			memcpy(&targetSlotOffset, pageData + PAGE_SIZE - sizeof(OffsetType) * (targetSlot + 2), sizeof(OffsetType));
+			if (targetSlot < oldSlotCount - 1) // We need to move back other slots to make more space if we insert the slot in the middle
+				moveSlots(targetSlotOffset + slotSize, targetSlot + 1, oldSlotCount - 1, pageData);
+			OffsetType offset = targetSlotOffset;
+			int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
+			memcpy(pageData + offset, &slotSize, sizeof(OffsetType));
+			offset += sizeof(OffsetType);
+			memcpy(pageData + offset, fieldInfo, fieldInfoSize);
+			offset += fieldInfoSize;
+			memcpy(pageData + offset, (char *)data + nullFieldsIndicatorActualSize, dataSize);
+		}
         status = fileHandle.writePage(pageNum, pageData);
         if (status == -1)
         {
@@ -134,7 +157,7 @@ RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector
             return -1;
         }
         rid.pageNum = pageNum;
-        rid.slotNum = slotCount;
+        rid.slotNum = targetSlot;
 		free(pageData);
     }
     else
@@ -150,8 +173,16 @@ RC RecordBasedFileManager::addDataInNewPage(FileHandle &fileHandle, const vector
 	int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
 	char *newData = (char*)calloc(PAGE_SIZE, 1);
 	OffsetType slotCount = 0;
-	OffsetType slotTableSize = generateSlotTable(newData, slotCount);
-	OffsetType pageSize = sizeof(OffsetType) + slotSize + slotTableSize;
+	OffsetType targetSlot = generateSlotTable(newData, slotCount, slotSize);
+	if (targetSlot != 0)
+	{
+#ifdef DEBUG
+		cerr << "Cannot generate slot table when add data in a new page" << endl;
+#endif
+		free(newData);
+		return -1;
+	}
+	OffsetType pageSize = sizeof(OffsetType) + slotSize + sizeof(OffsetType) * 2; //pageSizeNum + slotSize + slotTableSize 
 	fileHandle.allPagesSize.push_back(pageSize);
 	OffsetType offset = 0;
     memcpy(newData + offset, &pageSize, sizeof(OffsetType));
@@ -358,10 +389,9 @@ RC RecordBasedFileManager::printRecord(const vector<Attribute> &recordDescriptor
 	return 0;
 }
 
-OffsetType RecordBasedFileManager::generateSlotTable(char* &data, OffsetType &slotCount)
+OffsetType RecordBasedFileManager::generateSlotTable(char* &data, OffsetType &slotCount, OffsetType &slotSize)
 {
 	OffsetType newSlotCount = slotCount + 1;
-	OffsetType slotTableSize = 0;
 	if (slotCount == 0)
 	{
 		//If the slot table is empty
@@ -372,6 +402,34 @@ OffsetType RecordBasedFileManager::generateSlotTable(char* &data, OffsetType &sl
 	else
 	{
 		//If the slot table is not empty
+		//First find out whether there is a deleted slot in the table
+		//If not, we will add the slot in the back
+		for (OffsetType i = 0; i < slotCount; i++)
+		{
+			OffsetType slotOffset;
+			memcpy(&slotOffset, data + PAGE_SIZE - sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
+			if (slotOffset == -1)
+			{
+				//If deleted slot is not the last slot in table
+				if (i < slotCount - 1)
+				{
+					OffsetType nextSlotOffset;
+					memcpy(&nextSlotOffset, data + PAGE_SIZE - sizeof(OffsetType) * (i + 3), sizeof(OffsetType));
+					memcpy(data + PAGE_SIZE - sizeof(OffsetType) * (i + 2), &nextSlotOffset, sizeof(OffsetType));
+				}
+				else
+				{
+					OffsetType previousSlotOffset;
+					memcpy(&previousSlotOffset, data + PAGE_SIZE - sizeof(OffsetType) * (i + 1), sizeof(OffsetType));
+					OffsetType previousSlotSize;
+					memcpy(&previousSlotSize, data + previousSlotOffset, sizeof(OffsetType));
+					OffsetType targetSlotOffset = previousSlotOffset + previousSlotSize;
+					memcpy(data + PAGE_SIZE - sizeof(OffsetType) * (i + 2), &targetSlotOffset, sizeof(OffsetType));
+				}
+				return i;
+			}
+		}
+
 		OffsetType lastSlotOffset;
 		memcpy(&lastSlotOffset, data + PAGE_SIZE - sizeof(OffsetType) * (slotCount + 1), sizeof(OffsetType));
 		OffsetType lastSlotSize;
@@ -380,8 +438,7 @@ OffsetType RecordBasedFileManager::generateSlotTable(char* &data, OffsetType &sl
 		memcpy(data + PAGE_SIZE - sizeof(OffsetType), &newSlotCount, sizeof(OffsetType));
 		memcpy(data + PAGE_SIZE - sizeof(OffsetType) * (newSlotCount + 1), &newSlotOffset, sizeof(OffsetType));
 	}
-	slotTableSize = sizeof(OffsetType) * (newSlotCount + 1);
-	return slotTableSize;
+	return slotCount;
 }
 
 RC RecordBasedFileManager::deleteRecord(FileHandle &fileHandle, const vector<Attribute> &recordDescriptor, const RID &rid)
