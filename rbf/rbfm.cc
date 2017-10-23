@@ -617,22 +617,59 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 				free(finalPage);
 				return -1;
 			}
-			OffsetType offset = slotOffset;
-			OffsetType tombStoneMark = -1;
-			memcpy(finalPage + offset, &tombStoneMark, sizeof(OffsetType));
-			offset += sizeof(OffsetType);
-			memcpy(finalPage + offset, &(newRid.pageNum), sizeof(PageNum));
-			offset += sizeof(PageNum);
-			memcpy(finalPage + offset, &(newRid.slotNum), sizeof(OffsetType));
-			offset += sizeof(OffsetType);
-			OffsetType slotCount;
-			memcpy(&slotCount, finalPage + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
-			moveSlots(offset, slotNum + 1, slotCount, finalPage);
-			//Decrease the size of page by target slot size
-			OffsetType pageSize = fileHandle.allPagesSize[pageNum];
-			pageSize += sizeof(OffsetType) * 2 + sizeof(PageNum) - oldSlotSize;
-			memcpy(finalPage, &pageSize, sizeof(OffsetType));
-			fileHandle.allPagesSize[pageNum] = pageSize;
+
+			//Whether we are updating the record in its original page and slot
+			if (rid.pageNum != finalRid.pageNum || rid.slotNum != finalRid.slotNum)
+			{
+				PageNum startPageNum = rid.pageNum;
+				OffsetType startSlotNum = rid.slotNum;
+				char* startPage = (char*)malloc(PAGE_SIZE);
+				status = fileHandle.readPage(startPageNum, startPage);
+				if (status == -1)
+				{
+#ifdef DEBUG
+					cerr << "Cannot read the start page " << startPageNum << " when updating record." << endl;
+#endif
+					free(startPage);
+					free(finalPage);
+					return -1;
+				}
+				OffsetType startSlotOffset;
+				memcpy(&startSlotOffset, startPage + PAGE_SIZE - sizeof(OffsetType) * (startSlotNum + 2), sizeof(OffsetType));
+				OffsetType offset = startSlotOffset + sizeof(OffsetType);
+				memcpy(finalPage + offset, &(newRid.pageNum), sizeof(PageNum));
+				offset += sizeof(PageNum);
+				memcpy(finalPage + offset, &(newRid.slotNum), sizeof(OffsetType));
+				status = deleteRecord(fileHandle, recordDescriptor, finalRid);
+				if (status == -1)
+				{
+#ifdef DEBUG
+					cerr << "Cannot delete the final record when updating record." << endl;
+#endif
+					free(startPage);
+					free(finalPage);
+					return -1;
+				}
+			}
+			else
+			{
+				OffsetType offset = slotOffset;
+				OffsetType tombStoneMark = -1;
+				memcpy(finalPage + offset, &tombStoneMark, sizeof(OffsetType));
+				offset += sizeof(OffsetType);
+				memcpy(finalPage + offset, &(newRid.pageNum), sizeof(PageNum));
+				offset += sizeof(PageNum);
+				memcpy(finalPage + offset, &(newRid.slotNum), sizeof(OffsetType));
+				offset += sizeof(OffsetType);
+				OffsetType slotCount;
+				memcpy(&slotCount, finalPage + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
+				moveSlots(offset, slotNum + 1, slotCount, finalPage);
+				//Decrease the size of page by target slot size
+				OffsetType pageSize = fileHandle.allPagesSize[pageNum];
+				pageSize += sizeof(OffsetType) * 2 + sizeof(PageNum) - oldSlotSize;
+				memcpy(finalPage, &pageSize, sizeof(OffsetType));
+				fileHandle.allPagesSize[pageNum] = pageSize;
+			}
 		}
 	}
 	status = fileHandle.writePage(pageNum, finalPage);
@@ -852,9 +889,9 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 							}
 							if (compResult < 0 && (*compOp == GT_OP || *compOp == GE_OP || *compOp == EQ_OP))
 								continue;
-							if (compResult == 0 && *compOp != EQ_OP)
+							if (compResult == 0 && (*compOp == LT_OP || *compOp == GT_OP || *compOp == NE_OP))
 								continue;
-							if (compResult > 0 && (*compOp == LT_OP || *compOp != LE_OP || *compOp == EQ_OP))
+							if (compResult > 0 && (*compOp == LT_OP || *compOp == LE_OP || *compOp == EQ_OP))
 								continue;
 						}
 						//Get all the projected fields in the record and combine them
