@@ -478,3 +478,8 @@ RC FileHandle::generateAllPagesSize(vector<OffsetType> &allPagesSize)
 	}
 	return 0;
 }
+
+MarkType FileHandle::getCurrentVersion()
+{
+	return 0;
+}

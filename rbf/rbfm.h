@@ -39,6 +39,7 @@ typedef enum { EQ_OP = 0, // no condition// =
            NO_OP       // no condition
 } CompOp;
 
+enum UpdatedRecordMark { Origin = 0, Tombstone, UpdatedRecord};
 
 /********************************************************************************
 The scan iterator is NOT required to be implemented for the part 1 of the project 

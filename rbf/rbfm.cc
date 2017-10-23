@@ -80,7 +80,7 @@ void RecordBasedFileManager::generateFieldInfo(const vector<Attribute> &recordDe
 		else
 			fieldOffset = -1;
 		if (fieldOffset != -1)
-			fieldOffset += sizeof(OffsetType) + resultLength - nullFieldsIndicatorActualSize;
+			fieldOffset += sizeof(OffsetType) + 2 * sizeof(MarkType) + resultLength - nullFieldsIndicatorActualSize;
 		memcpy(result + offset, &fieldOffset, sizeof(OffsetType));
 		offset += sizeof(OffsetType);
 	}
@@ -94,7 +94,7 @@ RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector
 	OffsetType oldPageSize = fileHandle.allPagesSize[pageNum];
 	++fileHandle.readPageCounter;
 
-	OffsetType slotSize = sizeof(OffsetType) + fieldInfoSize + dataSize; // slotSizeNumber + fieldInfoSize + dataSize
+	OffsetType slotSize = sizeof(OffsetType) + 2 * sizeof(MarkType) + fieldInfoSize + dataSize; // slotSizeNumber + isUpdatedRecord + version + fieldInfoSize + dataSize
 	OffsetType newPageSize = oldPageSize + slotSize + sizeof(OffsetType); // In fact newPageSize would be oldPageSize + slotSize, if we decide to reuse a previous deleted slot
     if (newPageSize <= PAGE_SIZE)
     {
@@ -126,6 +126,12 @@ RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector
 			offset += oldPageSize - oldSlotTableSize;
 			memcpy(pageData + offset, &slotSize, sizeof(OffsetType));
 			offset += sizeof(OffsetType);
+			MarkType isUpdatedRecord = 0;
+			memcpy(pageData + offset, &isUpdatedRecord, sizeof(MarkType));
+			offset += sizeof(MarkType);
+			MarkType version = fileHandle.getCurrentVersion();
+			memcpy(pageData + offset, &version, sizeof(MarkType));
+			offset += sizeof(MarkType);
 			memcpy(pageData + offset, fieldInfo, fieldInfoSize);
 			offset += fieldInfoSize;
 			memcpy(pageData + offset, (char *)data + nullFieldsIndicatorActualSize, dataSize);
@@ -142,6 +148,12 @@ RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector
 			int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
 			memcpy(pageData + offset, &slotSize, sizeof(OffsetType));
 			offset += sizeof(OffsetType);
+			MarkType isUpdatedRecord = UpdatedRecordMark::Origin;
+			memcpy(pageData + offset, &isUpdatedRecord, sizeof(MarkType));
+			offset += sizeof(MarkType);
+			MarkType version = fileHandle.getCurrentVersion();
+			memcpy(pageData + offset, &version, sizeof(MarkType));
+			offset += sizeof(MarkType);
 			memcpy(pageData + offset, fieldInfo, fieldInfoSize);
 			offset += fieldInfoSize;
 			memcpy(pageData + offset, (char *)data + nullFieldsIndicatorActualSize, dataSize);
@@ -169,7 +181,7 @@ RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector
 
 RC RecordBasedFileManager::addDataInNewPage(FileHandle &fileHandle, const vector<Attribute> &recordDescriptor, const void *data, RID &rid, OffsetType &fieldInfoSize, char* &fieldInfo, OffsetType &dataSize)
 {
-	OffsetType slotSize = sizeof(OffsetType) + fieldInfoSize + dataSize;
+	OffsetType slotSize = sizeof(OffsetType) + 2 * sizeof(MarkType) + fieldInfoSize + dataSize; // slotSizeNumber + isUpdatedRecord + version + fieldInfoSize + dataSize
 	int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
 	char *newData = (char*)calloc(PAGE_SIZE, 1);
 	OffsetType slotCount = 0;
@@ -189,6 +201,12 @@ RC RecordBasedFileManager::addDataInNewPage(FileHandle &fileHandle, const vector
     offset += sizeof(OffsetType);
     memcpy(newData + offset, &slotSize, sizeof(OffsetType));
     offset += sizeof(OffsetType);
+	MarkType isUpdatedRecord = UpdatedRecordMark::Origin;
+	memcpy(newData + offset, &isUpdatedRecord, sizeof(MarkType));
+	offset += sizeof(MarkType);
+	MarkType version = fileHandle.getCurrentVersion();
+	memcpy(newData + offset, &version, sizeof(MarkType));
+	offset += sizeof(MarkType);
 	memcpy(newData + offset, fieldInfo, fieldInfoSize);
 	offset += fieldInfoSize;
 	memcpy(newData + offset, (char *)data + nullFieldsIndicatorActualSize, dataSize);
@@ -313,7 +331,10 @@ RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const vector<Attri
 
 	OffsetType slotSize;
 	memcpy(&slotSize, pageData + offset, sizeof(OffsetType));
-	offset += sizeof(OffsetType);
+	offset += sizeof(OffsetType) + sizeof(MarkType);
+	MarkType version;
+	memcpy(&version, pageData + offset, sizeof(MarkType));
+	offset += sizeof(MarkType);
 	OffsetType fieldNum;
 	memcpy(&fieldNum, pageData + offset, sizeof(OffsetType));
 	offset += sizeof(OffsetType);
@@ -554,11 +575,14 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 	memcpy(&slotOffset, finalPage + PAGE_SIZE - sizeof(OffsetType) * (slotNum + 2), sizeof(OffsetType));
 	OffsetType oldSlotSize;
 	memcpy(&oldSlotSize, finalPage + slotOffset, sizeof(OffsetType));
-	OffsetType newSlotSize = sizeof(OffsetType) + fieldInfoSize + dataSize;
+	OffsetType newSlotSize = sizeof(OffsetType) + 2 * sizeof(MarkType) + fieldInfoSize + dataSize;
 
 	if (oldSlotSize == newSlotSize)
 	{
-		OffsetType offset = slotOffset + sizeof(OffsetType);
+		OffsetType offset = slotOffset + sizeof(OffsetType) + sizeof(MarkType);
+		MarkType version = fileHandle.getCurrentVersion();
+		memcpy(finalPage + offset, &version, sizeof(MarkType));
+		offset += sizeof(MarkType);
 		memcpy(finalPage + offset, fieldInfo, fieldInfoSize);
 		offset += fieldInfoSize;
 		int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
@@ -568,7 +592,10 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 	{
 		OffsetType offset = slotOffset;
 		memcpy(finalPage + offset, &newSlotSize, sizeof(OffsetType));
-		offset += sizeof(OffsetType);
+		offset += sizeof(OffsetType) + sizeof(MarkType);
+		MarkType version = fileHandle.getCurrentVersion();
+		memcpy(finalPage + offset, &version, sizeof(MarkType));
+		offset += sizeof(MarkType);
 		memcpy(finalPage + offset, fieldInfo, fieldInfoSize);
 		offset += fieldInfoSize;
 		int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
@@ -594,7 +621,10 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 			moveSlots(slotEndOffset, slotNum + 1, slotCount, finalPage);
 			OffsetType offset = slotOffset;
 			memcpy(finalPage + offset, &newSlotSize, sizeof(OffsetType));
-			offset += sizeof(OffsetType);
+			offset += sizeof(OffsetType) + sizeof(MarkType);
+			MarkType version = fileHandle.getCurrentVersion();
+			memcpy(finalPage + offset, &version, sizeof(MarkType));
+			offset += sizeof(MarkType);
 			memcpy(finalPage + offset, fieldInfo, fieldInfoSize);
 			offset += fieldInfoSize;
 			int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
@@ -618,7 +648,7 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 				return -1;
 			}
 
-			//Whether we are updating the record in its original page and slot
+			//When we are not updating the record in its original page and slot
 			if (rid.pageNum != finalRid.pageNum || rid.slotNum != finalRid.slotNum)
 			{
 				PageNum startPageNum = rid.pageNum;
@@ -636,10 +666,10 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 				}
 				OffsetType startSlotOffset;
 				memcpy(&startSlotOffset, startPage + PAGE_SIZE - sizeof(OffsetType) * (startSlotNum + 2), sizeof(OffsetType));
-				OffsetType offset = startSlotOffset + sizeof(OffsetType);
-				memcpy(finalPage + offset, &(newRid.pageNum), sizeof(PageNum));
+				OffsetType offset = startSlotOffset + sizeof(OffsetType) + sizeof(MarkType);
+				memcpy(startPage + offset, &(newRid.pageNum), sizeof(PageNum));
 				offset += sizeof(PageNum);
-				memcpy(finalPage + offset, &(newRid.slotNum), sizeof(OffsetType));
+				memcpy(startPage + offset, &(newRid.slotNum), sizeof(OffsetType));
 				status = deleteRecord(fileHandle, recordDescriptor, finalRid);
 				if (status == -1)
 				{
@@ -650,13 +680,57 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 					free(finalPage);
 					return -1;
 				}
+				status = fileHandle.writePage(startPageNum, startPage);
+				if (status == -1)
+				{
+#ifdef DEBUG
+					cerr << "Cannot write the start page " << startPageNum << " when updating record." << endl;
+#endif
+					free(startPage);
+					free(finalPage);
+					return -1;
+				}
+				free(startPage);
+
+				//Modify the isUpdatedRecord mark in the inserted record
+				char* insertRecordPage = (char*)malloc(PAGE_SIZE);
+				status = fileHandle.readPage(newRid.pageNum, insertRecordPage);
+				if (status == -1)
+				{
+#ifdef DEBUG
+					cerr << "Cannot read the insert page " << newRid.pageNum << " when updating record." << endl;
+#endif
+					free(insertRecordPage);
+					free(finalPage);
+					return -1;
+				}
+				OffsetType insertSlotOffset;
+				memcpy(&insertSlotOffset, insertRecordPage + PAGE_SIZE - sizeof(OffsetType) * (newRid.slotNum + 2), sizeof(OffsetType));
+				MarkType isUpdatedRecord = UpdatedRecordMark::UpdatedRecord;
+				memcpy(insertRecordPage + insertSlotOffset + sizeof(OffsetType), &isUpdatedRecord, sizeof(MarkType));
+				status = fileHandle.writePage(newRid.pageNum, insertRecordPage);
+				if (status == -1)
+				{
+#ifdef DEBUG
+					cerr << "Cannot write the insert page " << newRid.pageNum << " when updating record." << endl;
+#endif
+					free(insertRecordPage);
+					free(finalPage);
+					return -1;
+				}
+				free(insertRecordPage);
+				free(finalPage);
+				return 0;
 			}
 			else
 			{
 				OffsetType offset = slotOffset;
-				OffsetType tombStoneMark = -1;
-				memcpy(finalPage + offset, &tombStoneMark, sizeof(OffsetType));
+				OffsetType slotSize = sizeof(OffsetType) + sizeof(MarkType) + sizeof(PageNum) + sizeof(OffsetType);
+				memcpy(finalPage + offset, &slotSize, sizeof(OffsetType));
 				offset += sizeof(OffsetType);
+				MarkType isUpdatedRecord = UpdatedRecordMark::Tombstone;
+				memcpy(finalPage + offset, &isUpdatedRecord, sizeof(MarkType));
+				offset += sizeof(MarkType);
 				memcpy(finalPage + offset, &(newRid.pageNum), sizeof(PageNum));
 				offset += sizeof(PageNum);
 				memcpy(finalPage + offset, &(newRid.slotNum), sizeof(OffsetType));
@@ -666,7 +740,7 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 				moveSlots(offset, slotNum + 1, slotCount, finalPage);
 				//Decrease the size of page by target slot size
 				OffsetType pageSize = fileHandle.allPagesSize[pageNum];
-				pageSize += sizeof(OffsetType) * 2 + sizeof(PageNum) - oldSlotSize;
+				pageSize += slotSize - oldSlotSize;
 				memcpy(finalPage, &pageSize, sizeof(OffsetType));
 				fileHandle.allPagesSize[pageNum] = pageSize;
 			}
@@ -703,12 +777,12 @@ RC RecordBasedFileManager::toFinalSlot(FileHandle &fileHandle, const RID &fromSl
 	{
 		OffsetType slotOffset;
 		memcpy(&slotOffset, currentPage + PAGE_SIZE - sizeof(OffsetType) * (currentSlotNum + 2), sizeof(OffsetType));
-		OffsetType slotSize;
-		memcpy(&slotSize, currentPage + slotOffset, sizeof(OffsetType));
-		if (slotSize == -1)
+		MarkType isUpdatedRecord;
+		memcpy(&isUpdatedRecord, currentPage + slotOffset + sizeof(OffsetType), sizeof(MarkType));
+		if (isUpdatedRecord == UpdatedRecordMark::Tombstone)
 		{
-			memcpy(&currentPageNum, currentPage + slotOffset + sizeof(OffsetType), sizeof(PageNum));
-			memcpy(&currentSlotNum, currentPage + slotOffset + sizeof(OffsetType) + sizeof(PageNum), sizeof(OffsetType));
+			memcpy(&currentPageNum, currentPage + slotOffset + sizeof(OffsetType) + sizeof(MarkType), sizeof(PageNum));
+			memcpy(&currentSlotNum, currentPage + slotOffset + sizeof(OffsetType) + sizeof(MarkType) + sizeof(PageNum), sizeof(OffsetType));
 			status = fileHandle.readPage(currentPageNum, currentPage);
 			if (status == -1)
 			{
@@ -750,7 +824,7 @@ RC RecordBasedFileManager::readAttribute(FileHandle &fileHandle, const vector<At
 			OffsetType slotOffset;
 			memcpy(&slotOffset, finalPage + PAGE_SIZE - sizeof(OffsetType) * (slotNum + 2), sizeof(OffsetType));
 			OffsetType attrOffset;
-			memcpy(&attrOffset, finalPage + slotOffset + sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
+			memcpy(&attrOffset, finalPage + slotOffset + 2 * sizeof(MarkType) + sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
 			if (attrOffset != -1)
 			{
 				OffsetType attrLength;
@@ -763,7 +837,7 @@ RC RecordBasedFileManager::readAttribute(FileHandle &fileHandle, const vector<At
 				else
 				{
 					OffsetType nextAttrOffset;
-					memcpy(&nextAttrOffset, finalPage + slotOffset + sizeof(OffsetType) * (i + 1 + 2), sizeof(OffsetType));
+					memcpy(&nextAttrOffset, finalPage + slotOffset + 2 * sizeof(MarkType) + sizeof(OffsetType) * (i + 1 + 2), sizeof(OffsetType));
 					attrLength = nextAttrOffset - attrOffset;
 				}
 				memcpy(data, finalPage + attrOffset, attrLength);
@@ -860,17 +934,33 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 				//Whether the slot has been deleted
 				if (slotOffset != -1)
 				{
-					OffsetType slotSize;
-					memcpy(&slotSize, pageData + slotOffset, sizeof(OffsetType));
+					MarkType isUpdatedRecord;
+					memcpy(&isUpdatedRecord, pageData + slotOffset + sizeof(OffsetType), sizeof(MarkType));
 					//Whether the slot is a tomb stone
-					if (slotSize != -1)
+					if (isUpdatedRecord != UpdatedRecordMark::UpdatedRecord)
 					{
+						if (isUpdatedRecord == UpdatedRecordMark::Tombstone)
+						{
+							RID fromRid;
+							fromRid.pageNum = i;
+							fromRid.slotNum = j;
+							RID finalRid;
+							status = RecordBasedFileManager::instance()->toFinalSlot(*fileHandle, fromRid, finalRid, pageData);
+							if (status == -1)
+							{
+#ifdef DEBUG
+								cerr << "Cannot read final page " << i << " when getting the next record." << endl;
+#endif
+								free(pageData);
+								return -1;
+							}
+						}
 						//Whether the query has a condition
 						//If it has a condition and does not satisfy the condition, we will continue the loop and go to the next record
 						if (conditionField != -1)
 						{
 							OffsetType conditionOffset;
-							memcpy(&conditionOffset, pageData + slotOffset + sizeof(OffsetType) * (2 + conditionField), sizeof(OffsetType));
+							memcpy(&conditionOffset, pageData + slotOffset + 2 * sizeof(MarkType) + sizeof(OffsetType) * (2 + conditionField), sizeof(OffsetType));
 							AttrType conditionType = recordDescriptor->at(conditionField).type;
 							int compResult;
 							if (conditionType == TypeInt)

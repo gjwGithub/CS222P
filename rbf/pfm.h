@@ -5,6 +5,7 @@ typedef unsigned PageNum;
 typedef int RC;
 typedef char byte;
 typedef short OffsetType;
+typedef unsigned char MarkType;
 
 //#define DEBUG
 
@@ -65,6 +66,7 @@ public:
 
 	vector<OffsetType> allPagesSize;
 	RC generateAllPagesSize(vector<OffsetType> &allPagesSize);
+	MarkType getCurrentVersion();
 }; 
 
 #endif
