@@ -871,7 +871,7 @@ RC RecordBasedFileManager::scan(FileHandle &fileHandle,
 	rbfm_ScanIterator.setCompOp(compOp);
 	rbfm_ScanIterator.setValue(value);
 	rbfm_ScanIterator.currentPageNum = 0;
-	rbfm_ScanIterator.currentSlotNum = 0;
+	rbfm_ScanIterator.currentSlotNum = -1; //We will start at rid = (0,0) next time
 	rbfm_ScanIterator.setMaxPageNum(fileHandle.allPagesSize.size() - 1);
 	rbfm_ScanIterator.setConditionField(-1);
 	rbfm_ScanIterator.setFileHandle(fileHandle);
@@ -976,7 +976,11 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 							{
 								int strLength;
 								memcpy(&strLength, pageData + slotOffset + conditionOffset, sizeof(int));
-								compResult = memcmp(pageData + slotOffset + conditionOffset + sizeof(int), value, strLength);
+								int conditionStrLength;
+								memcpy(&conditionStrLength, value, sizeof(int));
+								compResult = strLength - conditionStrLength;
+								if (compResult == 0)
+									compResult = memcmp(pageData + slotOffset + conditionOffset + sizeof(int), (char*)value + sizeof(int), strLength);
 							}
 							if (compResult < 0 && (compOp == GT_OP || compOp == GE_OP || compOp == EQ_OP))
 								continue;
