@@ -945,6 +945,7 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 							fromRid.pageNum = i;
 							fromRid.slotNum = j;
 							RID finalRid;
+							free(pageData);
 							status = RecordBasedFileManager::instance()->toFinalSlot(*fileHandle, fromRid, finalRid, pageData);
 							if (status == -1)
 							{
@@ -977,11 +978,11 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 								memcpy(&strLength, pageData + slotOffset + conditionOffset, sizeof(int));
 								compResult = memcmp(pageData + slotOffset + conditionOffset + sizeof(int), value, strLength);
 							}
-							if (compResult < 0 && (*compOp == GT_OP || *compOp == GE_OP || *compOp == EQ_OP))
+							if (compResult < 0 && (compOp == GT_OP || compOp == GE_OP || compOp == EQ_OP))
 								continue;
-							if (compResult == 0 && (*compOp == LT_OP || *compOp == GT_OP || *compOp == NE_OP))
+							if (compResult == 0 && (compOp == LT_OP || compOp == GT_OP || compOp == NE_OP))
 								continue;
-							if (compResult > 0 && (*compOp == LT_OP || *compOp == LE_OP || *compOp == EQ_OP))
+							if (compResult > 0 && (compOp == LT_OP || compOp == LE_OP || compOp == EQ_OP))
 								continue;
 						}
 						//Get all the projected fields in the record and combine them
@@ -994,7 +995,7 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 							if (nullFields % 8 == 0)
 								nullFields = 0;
 							OffsetType fieldOffset;
-							memcpy(&fieldOffset, pageData + slotOffset + sizeof(OffsetType) * (2 + k), sizeof(OffsetType));
+							memcpy(&fieldOffset, pageData + slotOffset + 2 * sizeof(MarkType) + sizeof(OffsetType) * (2 + k), sizeof(OffsetType));
 							if (fieldOffset == -1)
 							{
 								nullFields += 1 << (7 - k % 8);
