@@ -33,6 +33,7 @@ RC RecordBasedFileManager::openFile(const string &fileName, FileHandle &fileHand
 }
 
 RC RecordBasedFileManager::closeFile(FileHandle &fileHandle) {
+	fileHandle.allPagesSize.clear();
     return PagedFileManager::instance()->closeFile(fileHandle);
 }
 
@@ -832,7 +833,7 @@ RC RecordBasedFileManager::readAttribute(FileHandle &fileHandle, const vector<At
 				{
 					OffsetType slotSize;
 					memcpy(&slotSize, finalPage + slotOffset, sizeof(OffsetType));
-					attrLength = slotOffset + slotSize - attrOffset;
+					attrLength = slotSize - attrOffset;
 				}
 				else
 				{
@@ -840,7 +841,10 @@ RC RecordBasedFileManager::readAttribute(FileHandle &fileHandle, const vector<At
 					memcpy(&nextAttrOffset, finalPage + slotOffset + 2 * sizeof(MarkType) + sizeof(OffsetType) * (i + 1 + 2), sizeof(OffsetType));
 					attrLength = nextAttrOffset - attrOffset;
 				}
-				memcpy(data, finalPage + attrOffset, attrLength);
+				unsigned char nullFields = 0;
+				int nullFieldsIndicatorActualSize = ceil((double)1 / CHAR_BIT);
+				memcpy(data, &nullFields, nullFieldsIndicatorActualSize);
+				memcpy((char*)data + nullFieldsIndicatorActualSize, finalPage + slotOffset + attrOffset, attrLength);
 			}
 			else
 			{
@@ -869,7 +873,6 @@ RC RecordBasedFileManager::scan(FileHandle &fileHandle,
 {
 	rbfm_ScanIterator.setEnd(false);
 	rbfm_ScanIterator.setCompOp(compOp);
-	rbfm_ScanIterator.setValue(value);
 	rbfm_ScanIterator.currentPageNum = 0;
 	rbfm_ScanIterator.currentSlotNum = -1; //We will start at rid = (0,0) next time
 	rbfm_ScanIterator.setMaxPageNum(fileHandle.allPagesSize.size() - 1);
@@ -902,6 +905,8 @@ RC RecordBasedFileManager::scan(FileHandle &fileHandle,
 #endif
 		return -1;
 	}
+
+	rbfm_ScanIterator.setValue(value);
 	return 0;
 }
 
@@ -962,7 +967,7 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 						{
 							OffsetType conditionOffset;
 							memcpy(&conditionOffset, pageData + slotOffset + 2 * sizeof(MarkType) + sizeof(OffsetType) * (2 + conditionField), sizeof(OffsetType));
-							AttrType conditionType = recordDescriptor->at(conditionField).type;
+							AttrType conditionType = recordDescriptor.at(conditionField).type;
 							int compResult;
 							if (conditionType == TypeInt)
 							{
@@ -999,14 +1004,14 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 							if (nullFields % 8 == 0)
 								nullFields = 0;
 							OffsetType fieldOffset;
-							memcpy(&fieldOffset, pageData + slotOffset + 2 * sizeof(MarkType) + sizeof(OffsetType) * (2 + k), sizeof(OffsetType));
+							memcpy(&fieldOffset, pageData + slotOffset + 2 * sizeof(MarkType) + sizeof(OffsetType) * (2 + outputFields[k]), sizeof(OffsetType));
 							if (fieldOffset == -1)
 							{
 								nullFields += 1 << (7 - k % 8);
 							}
 							else
 							{
-								AttrType attrType = recordDescriptor->at(outputFields[k]).type;
+								AttrType attrType = recordDescriptor.at(outputFields[k]).type;
 								int fieldLength = 0;
 								if (attrType == TypeInt)
 									fieldLength = sizeof(int);

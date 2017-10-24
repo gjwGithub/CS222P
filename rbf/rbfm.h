@@ -65,7 +65,20 @@ public:
   // a satisfying record needs to be fetched from the file.
   // "data" follows the same format as RecordBasedFileManager::insertRecord().
   RC getNextRecord(RID &rid, void *data);
-  RC close() { end = true; return 0; }
+  RC close() 
+  { 
+	  fileHandle = NULL;
+	  recordDescriptor.clear();
+	  outputFields.clear();
+	  conditionField = 0;
+	  compOp = CompOp::NO_OP;
+	  free(value);
+	  currentPageNum = 0;
+	  currentSlotNum = -1;
+	  maxPageNum = 0;
+	  end = true; 
+	  return 0; 
+  }
 
   PageNum currentPageNum;
   OffsetType currentSlotNum;
@@ -76,8 +89,36 @@ public:
   vector<OffsetType>* getOutputFields() { return &(this->outputFields); }
   void setConditionField(OffsetType conditionField) { this->conditionField = conditionField; }
   void setCompOp(const CompOp compOp) { this->compOp = compOp; }
-  void setValue(const void* value) { this->value = value; }
-  void setRecordDescriptor(const vector<Attribute> &recordDescriptor) { this->recordDescriptor = &recordDescriptor; }
+  void setValue(const void* value) 
+  { 
+	  if (this->conditionField == -1)
+	  {
+		  this->value = NULL;
+	  }
+	  else
+	  {
+		  AttrType conditionType = this->recordDescriptor.at(this->conditionField).type;
+		  if (conditionType == TypeInt)
+		  {
+			  this->value = malloc(sizeof(int));
+			  memcpy(this->value, value, sizeof(int));
+		  }
+		  else if (conditionType == TypeReal)
+		  {
+			  this->value = malloc(sizeof(float));
+			  memcpy(this->value, value, sizeof(float));
+		  }
+		  else if (conditionType == TypeVarChar)
+		  {
+			  int conditionStrLength;
+			  memcpy(&conditionStrLength, value, sizeof(int));
+			  this->value = malloc(sizeof(int) + conditionStrLength);
+			  memcpy(this->value, value, sizeof(int));
+			  memcpy((char*)this->value + sizeof(int), (char*)value + sizeof(int), conditionStrLength);
+		  }
+	  }
+  }
+  void setRecordDescriptor(const vector<Attribute> &recordDescriptor) { this->recordDescriptor = recordDescriptor; }
   void setFileHandle(FileHandle &fileHandle) { this->fileHandle = &fileHandle; }
 
 private:
@@ -85,11 +126,11 @@ private:
 	bool end;
 
 	FileHandle* fileHandle;
-	const vector<Attribute>* recordDescriptor;
+	vector<Attribute> recordDescriptor;
 	vector<OffsetType> outputFields;
 	OffsetType conditionField;
 	CompOp compOp;
-	const void *value;
+	void *value;
 };
 
 
