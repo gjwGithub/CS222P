@@ -127,7 +127,7 @@ RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector
 			offset += oldPageSize - oldSlotTableSize;
 			memcpy(pageData + offset, &slotSize, sizeof(OffsetType));
 			offset += sizeof(OffsetType);
-			MarkType isUpdatedRecord = 0;
+			MarkType isUpdatedRecord = UpdatedRecordMark::Origin;
 			memcpy(pageData + offset, &isUpdatedRecord, sizeof(MarkType));
 			offset += sizeof(MarkType);
 			MarkType version = fileHandle.getCurrentVersion();
@@ -140,12 +140,15 @@ RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector
 		else
 		{
 			//If we reuse a previous deleted slot
-			fileHandle.allPagesSize[pageNum] = newPageSize - sizeof(OffsetType); //Since we didn't change the size of slot table
+			newPageSize -= sizeof(OffsetType); //Since we didn't change the size of slot table
+			fileHandle.allPagesSize[pageNum] = newPageSize;
+			OffsetType offset = 0;
+			memcpy(pageData + offset, &newPageSize, sizeof(OffsetType));
 			OffsetType targetSlotOffset;
 			memcpy(&targetSlotOffset, pageData + PAGE_SIZE - sizeof(OffsetType) * (targetSlot + 2), sizeof(OffsetType));
 			if (targetSlot < oldSlotCount - 1) // We need to move back other slots to make more space if we insert the slot in the middle
 				moveSlots(targetSlotOffset + slotSize, targetSlot + 1, oldSlotCount - 1, pageData);
-			OffsetType offset = targetSlotOffset;
+			offset = targetSlotOffset;
 			int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
 			memcpy(pageData + offset, &slotSize, sizeof(OffsetType));
 			offset += sizeof(OffsetType);
@@ -849,8 +852,11 @@ RC RecordBasedFileManager::readAttribute(FileHandle &fileHandle, const vector<At
 			else
 			{
 #ifdef DEBUG
-				cerr << "The attribute name " << attributeName << " contains null value" << endl;
+				cout << "The attribute name " << attributeName << " contains null value" << endl;
 #endif
+				unsigned char nullFields = 1 << 7;
+				int nullFieldsIndicatorActualSize = ceil((double)1 / CHAR_BIT);
+				memcpy(data, &nullFields, nullFieldsIndicatorActualSize);
 			}
 			free(finalPage);
 			return 0;
