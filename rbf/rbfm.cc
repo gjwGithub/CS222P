@@ -79,8 +79,8 @@ void RecordBasedFileManager::generateFieldInfo(const vector<Attribute> &recordDe
 			}
 		}
 		else
-			fieldOffset = -1;
-		if (fieldOffset != -1)
+			fieldOffset = NULLFIELD;
+		if (fieldOffset != NULLFIELD)
 			fieldOffset += sizeof(OffsetType) + 2 * sizeof(MarkType) + resultLength - nullFieldsIndicatorActualSize;
 		memcpy(result + offset, &fieldOffset, sizeof(OffsetType));
 		offset += sizeof(OffsetType);
@@ -325,7 +325,7 @@ RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const vector<Attri
 	}
 	OffsetType offset;
 	memcpy(&offset, pageData + PAGE_SIZE - sizeof(OffsetType) * (slotNum + 2), sizeof(OffsetType));
-	if (offset == -1)
+	if (offset == DELETEDSLOT)
 	{
 #ifdef DEBUG
 		cerr << "Reading a deleted record pageNum = " << finalRid.pageNum << " slotNum = " << slotNum << endl;
@@ -354,7 +354,7 @@ RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const vector<Attri
 			OffsetType fieldOffset;
 			memcpy(&fieldOffset, pageData + offset, sizeof(OffsetType));
 			offset += sizeof(OffsetType);
-			if (fieldOffset == -1)
+			if (fieldOffset == NULLFIELD)
 				nullFields += 1 << (7 - j);
 		}
 		nullFieldsIndicator[i / 8] = nullFields;
@@ -435,7 +435,7 @@ OffsetType RecordBasedFileManager::generateSlotTable(char* &data, OffsetType &sl
 		{
 			OffsetType slotOffset;
 			memcpy(&slotOffset, data + PAGE_SIZE - sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
-			if (slotOffset == -1)
+			if (slotOffset == DELETEDSLOT)
 			{
 				//If deleted slot is not the last slot in table
 				if (i < slotCount - 1)
@@ -509,7 +509,7 @@ RC RecordBasedFileManager::deleteRecord(FileHandle &fileHandle, const vector<Att
 	if ((OffsetType)slotNum < slotCount - 1)
 		moveSlots(slotOffset, slotNum + 1, slotCount - 1, finalPage);
 	//Change the target slot offset into -1
-	slotOffset = -1;
+	slotOffset = DELETEDSLOT;
 	memcpy(finalPage + PAGE_SIZE - sizeof(OffsetType) * (slotNum + 2), &slotOffset, sizeof(OffsetType));
 	status = fileHandle.writePage(pageNum, finalPage);
 	if (status == -1)
@@ -545,8 +545,12 @@ void RecordBasedFileManager::moveSlots(const OffsetType targetOffset, const Offs
 	{
 		OffsetType currentSlotOffset;
 		memcpy(&currentSlotOffset, pageData + PAGE_SIZE - sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
-		currentSlotOffset += deltaOffset;
-		memcpy(pageData + PAGE_SIZE - sizeof(OffsetType) * (i + 2), &currentSlotOffset, sizeof(OffsetType));
+		//If the slot has been deleted before, then we do not need to change its offset, which is -1
+		if (currentSlotOffset != DELETEDSLOT)
+		{
+			currentSlotOffset += deltaOffset;
+			memcpy(pageData + PAGE_SIZE - sizeof(OffsetType) * (i + 2), &currentSlotOffset, sizeof(OffsetType));
+		}
 	}
 
 	//Change total size of the page
@@ -784,7 +788,7 @@ RC RecordBasedFileManager::toFinalSlot(FileHandle &fileHandle, const RID &fromSl
 		OffsetType slotOffset;
 		memcpy(&slotOffset, currentPage + PAGE_SIZE - sizeof(OffsetType) * (currentSlotNum + 2), sizeof(OffsetType));
 		//Whether this slot has been deleted before
-		if (slotOffset == -1)
+		if (slotOffset == DELETEDSLOT)
 		{
 #ifdef DEBUG
 			cerr << "Cannot read a deleted slot " << " when traversing to final slot." << endl;
@@ -840,7 +844,7 @@ RC RecordBasedFileManager::readAttribute(FileHandle &fileHandle, const vector<At
 			memcpy(&slotOffset, finalPage + PAGE_SIZE - sizeof(OffsetType) * (slotNum + 2), sizeof(OffsetType));
 			OffsetType attrOffset;
 			memcpy(&attrOffset, finalPage + slotOffset + 2 * sizeof(MarkType) + sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
-			if (attrOffset != -1)
+			if (attrOffset != NULLFIELD)
 			{
 				OffsetType attrLength;
 				if (i == recordDescriptor.size() - 1)
@@ -893,7 +897,7 @@ RC RecordBasedFileManager::scan(FileHandle &fileHandle,
 	rbfm_ScanIterator.currentPageNum = 0;
 	rbfm_ScanIterator.currentSlotNum = -1; //We will start at rid = (0,0) next time
 	rbfm_ScanIterator.setMaxPageNum(fileHandle.allPagesSize.size() - 1);
-	rbfm_ScanIterator.setConditionField(-1);
+	rbfm_ScanIterator.setConditionField(NULLFIELD);
 	rbfm_ScanIterator.setFileHandle(fileHandle);
 	rbfm_ScanIterator.setRecordDescriptor(recordDescriptor);
 
@@ -954,7 +958,7 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 				OffsetType slotOffset;
 				memcpy(&slotOffset, pageData + PAGE_SIZE - sizeof(OffsetType) * (j + 2), sizeof(OffsetType));
 				//Whether the slot has been deleted
-				if (slotOffset != -1)
+				if (slotOffset != DELETEDSLOT)
 				{
 					MarkType isUpdatedRecord;
 					memcpy(&isUpdatedRecord, pageData + slotOffset + sizeof(OffsetType), sizeof(MarkType));
@@ -980,7 +984,7 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 						}
 						//Whether the query has a condition
 						//If it has a condition and does not satisfy the condition, we will continue the loop and go to the next record
-						if (conditionField != -1)
+						if (conditionField != NULLFIELD)
 						{
 							OffsetType conditionOffset;
 							memcpy(&conditionOffset, pageData + slotOffset + 2 * sizeof(MarkType) + sizeof(OffsetType) * (2 + conditionField), sizeof(OffsetType));
@@ -1022,7 +1026,7 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 								nullFields = 0;
 							OffsetType fieldOffset;
 							memcpy(&fieldOffset, pageData + slotOffset + 2 * sizeof(MarkType) + sizeof(OffsetType) * (2 + outputFields[k]), sizeof(OffsetType));
-							if (fieldOffset == -1)
+							if (fieldOffset == NULLFIELD)
 							{
 								nullFields += 1 << (7 - k % 8);
 							}

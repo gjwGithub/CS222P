@@ -9,6 +9,9 @@ typedef unsigned char MarkType;
 
 #define DEBUG
 
+#define NULLFIELD -1
+#define DELETEDSLOT -1
+
 #define PAGE_SIZE 4096
 #include <string>
 #include <climits>
