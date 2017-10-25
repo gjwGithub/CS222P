@@ -162,6 +162,7 @@ RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector
 			offset += fieldInfoSize;
 			memcpy(pageData + offset, (char *)data + nullFieldsIndicatorActualSize, dataSize);
 		}
+		++fileHandle.insertCount;
         status = fileHandle.writePage(pageNum, pageData);
         if (status == -1)
         {
@@ -214,6 +215,7 @@ RC RecordBasedFileManager::addDataInNewPage(FileHandle &fileHandle, const vector
 	memcpy(newData + offset, fieldInfo, fieldInfoSize);
 	offset += fieldInfoSize;
 	memcpy(newData + offset, (char *)data + nullFieldsIndicatorActualSize, dataSize);
+	++fileHandle.insertCount;
     RC status = fileHandle.appendPage(newData);
     if (status == -1)
     {

@@ -97,22 +97,22 @@ public:
 	  }
 	  else
 	  {
-      AttrType conditionType = this->recordDescriptor.at(this->conditionField).type;
+		  AttrType conditionType = this->recordDescriptor.at(this->conditionField).type;
 		  if (conditionType == TypeInt)
 		  {
-        this->value = malloc(sizeof(int));
+			  this->value = malloc(sizeof(int));
 			  memcpy(this->value, value, sizeof(int));
 		  }
 		  else if (conditionType == TypeReal)
 		  {
-        this->value = malloc(sizeof(float));
+			  this->value = malloc(sizeof(float));
 			  memcpy(this->value, value, sizeof(float));
 		  }
 		  else if (conditionType == TypeVarChar)
 		  {
 			  int conditionStrLength;
-        memcpy(&conditionStrLength, value, sizeof(int));
-        this->value = malloc(sizeof(int) + conditionStrLength);
+			  memcpy(&conditionStrLength, value, sizeof(int));
+			  this->value = malloc(sizeof(int) + conditionStrLength);
 			  memcpy(this->value, value, sizeof(int));
 			  memcpy((char*)this->value + sizeof(int), (char*)value + sizeof(int), conditionStrLength);
 		  }
