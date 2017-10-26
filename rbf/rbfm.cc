@@ -613,7 +613,7 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 		offset += dataSize;
 		OffsetType slotCount;
 		memcpy(&slotCount, finalPage + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
-		moveSlots(offset, slotNum + 1, slotCount, finalPage);
+		moveSlots(offset, slotNum + 1, slotCount - 1, finalPage);
 		//Decrease the size of page by target slot size
 		OffsetType pageSize = fileHandle.allPagesSize[pageNum];
 		pageSize += newSlotSize - oldSlotSize;
@@ -628,7 +628,7 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 			OffsetType slotEndOffset = slotOffset + newSlotSize;
 			OffsetType slotCount;
 			memcpy(&slotCount, finalPage + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
-			moveSlots(slotEndOffset, slotNum + 1, slotCount, finalPage);
+			moveSlots(slotEndOffset, slotNum + 1, slotCount - 1, finalPage);
 			OffsetType offset = slotOffset;
 			memcpy(finalPage + offset, &newSlotSize, sizeof(OffsetType));
 			offset += sizeof(OffsetType) + sizeof(MarkType);
@@ -747,7 +747,7 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 				offset += sizeof(OffsetType);
 				OffsetType slotCount;
 				memcpy(&slotCount, finalPage + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
-				moveSlots(offset, slotNum + 1, slotCount, finalPage);
+				moveSlots(offset, slotNum + 1, slotCount - 1, finalPage);
 				//Decrease the size of page by target slot size
 				OffsetType pageSize = fileHandle.allPagesSize[pageNum];
 				pageSize += slotSize - oldSlotSize;
