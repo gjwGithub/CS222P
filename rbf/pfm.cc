@@ -126,10 +126,14 @@ RC PagedFileManager::openFile(const string &fileName, FileHandle &fileHandle)
 {
 	if (fileHandle.getFile())
 	{
+		int status = fclose(fileHandle.getFile());
+		if (status)
+		{
 #ifdef DEBUG
-		cerr << "FileHandle is already a handle for some open file!" << endl;
+			cerr << "Cannot close the file before opening the file" << endl;
 #endif
-		return -1;
+			return -1;
+		}
 	}
     FILE *file;
 	file = fopen(fileName.c_str(), "rb+");
