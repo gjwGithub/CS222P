@@ -503,6 +503,26 @@ RC RecordBasedFileManager::deleteRecord(FileHandle &fileHandle, const vector<Att
 	//Decrease the size of page by target slot size
 	OffsetType pageSize = fileHandle.allPagesSize[pageNum];
 	pageSize -= slotSize;
+	//Find out whether the last slot in the slot table has been deleted before
+	OffsetType lastSlotOffset;
+	memcpy(&lastSlotOffset, finalPage + PAGE_SIZE - sizeof(OffsetType) * (slotCount - 1 + 2), sizeof(OffsetType));
+	if (lastSlotOffset == DELETEDSLOT)
+	{
+		//We will remove all the deleted slot in the back
+		int deletedSlotCount = 0;
+		for (OffsetType i = slotCount - 1; i >= 0; i--)
+		{
+			OffsetType iSlotOffset;
+			memcpy(&iSlotOffset, finalPage + PAGE_SIZE - sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
+			if (iSlotOffset == DELETEDSLOT)
+				++deletedSlotCount;
+			else
+				break;
+		}
+		slotCount -= deletedSlotCount;
+		memcpy(finalPage + PAGE_SIZE - sizeof(OffsetType), &slotCount, sizeof(OffsetType));
+		pageSize -= deletedSlotCount * sizeof(OffsetType);
+	}
 	memcpy(finalPage, &pageSize, sizeof(OffsetType));
 	fileHandle.allPagesSize[pageNum] = pageSize;
 	//Move forward other slots if target slot is not the last one
