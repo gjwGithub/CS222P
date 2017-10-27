@@ -126,10 +126,14 @@ RC PagedFileManager::openFile(const string &fileName, FileHandle &fileHandle)
 {
 	if (fileHandle.getFile())
 	{
+		int status = fclose(fileHandle.getFile());
+		if (status)
+		{
 #ifdef DEBUG
-		cerr << "FileHandle is already a handle for some open file!" << endl;
+			cerr << "Cannot close the file before opening the file" << endl;
 #endif
-		return -1;
+			return -1;
+		}
 	}
     FILE *file;
 	file = fopen(fileName.c_str(), "rb+");
@@ -194,6 +198,7 @@ FileHandle::FileHandle()
 	appendPageCounter = 0;
 	file = NULL;
 	pageCount = 0;
+	insertCount = 0;
 }
 
 
@@ -401,8 +406,10 @@ RC FileHandle::readMetaData()
 	offset += sizeof(unsigned);
 	memcpy(&(this->appendPageCounter), data + offset, sizeof(unsigned));
 	offset += sizeof(unsigned);
-	memcpy(&(this->pageCount), data + offset, sizeof(PageNum));
-	offset += sizeof(PageNum);
+	memcpy(&(this->pageCount), data + offset, sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(&(this->insertCount), data + offset, sizeof(unsigned));
+	offset += sizeof(unsigned);
 	free(data);
 	return 0;
 }
@@ -433,6 +440,8 @@ RC FileHandle::writeMetaData()
 	memcpy(data + offset, &(this->appendPageCounter), sizeof(unsigned));
 	offset += sizeof(unsigned);
 	memcpy(data + offset, &(this->pageCount), sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(data + offset, &(this->insertCount), sizeof(unsigned));
 	offset += sizeof(unsigned);
 	size_t writeSize = fwrite(data, 1, PAGE_SIZE, this->file);
 	if (writeSize != PAGE_SIZE)
