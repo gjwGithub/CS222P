@@ -482,8 +482,14 @@ RC RecordBasedFileManager::deleteRecord(FileHandle &fileHandle, const vector<Att
 		free(finalPage);
 		return -1;
 	}
-	PageNum pageNum = finalRid.pageNum;
-	unsigned int slotNum = finalRid.slotNum;
+	//Delete both the tombstone and real record
+	if (rid.pageNum != finalRid.pageNum || rid.slotNum != finalRid.slotNum)
+	{
+		deleteRecord(fileHandle, recordDescriptor, finalRid);
+		fileHandle.readPage(rid.pageNum, finalPage);
+	}
+	PageNum pageNum = rid.pageNum;
+	unsigned int slotNum = rid.slotNum;
 	//Get the number of slots
 	OffsetType slotCount;
 	memcpy(&slotCount, finalPage + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
@@ -811,7 +817,7 @@ RC RecordBasedFileManager::toFinalSlot(FileHandle &fileHandle, const RID &fromSl
 		if (slotOffset == DELETEDSLOT)
 		{
 #ifdef DEBUG
-			cerr << "Cannot read a deleted slot " << " when traversing to final slot." << endl;
+			cerr << "Cannot read a deleted slot " << currentSlotNum << " when traversing to final slot." << endl;
 #endif
 			finalPage = currentPage;
 			return -1;
