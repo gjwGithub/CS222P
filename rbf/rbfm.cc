@@ -162,7 +162,7 @@ RC RecordBasedFileManager::appendDataInPage(FileHandle &fileHandle, const vector
 			offset += fieldInfoSize;
 			memcpy(pageData + offset, (char *)data + nullFieldsIndicatorActualSize, dataSize);
 		}
-		++fileHandle.insertCount;
+        ++fileHandle.insertCount;
         status = fileHandle.writePage(pageNum, pageData);
         if (status == -1)
         {
@@ -440,9 +440,39 @@ OffsetType RecordBasedFileManager::generateSlotTable(char* &data, OffsetType &sl
 				//If deleted slot is not the last slot in table
 				if (i < slotCount - 1)
 				{
-					OffsetType nextSlotOffset;
-					memcpy(&nextSlotOffset, data + PAGE_SIZE - sizeof(OffsetType) * (i + 3), sizeof(OffsetType));
-					memcpy(data + PAGE_SIZE - sizeof(OffsetType) * (i + 2), &nextSlotOffset, sizeof(OffsetType));
+					//Find the offset of an undeleted slot to replace the offset of current slot
+					bool foundNotDeletedSlot = false;
+					for (OffsetType j = i + 1; j < slotCount; j++)
+					{
+						OffsetType nextSlotOffset;
+						memcpy(&nextSlotOffset, data + PAGE_SIZE - sizeof(OffsetType) * (j + 2), sizeof(OffsetType));
+						if (nextSlotOffset != DELETEDSLOT)
+						{
+							memcpy(data + PAGE_SIZE - sizeof(OffsetType) * (i + 2), &nextSlotOffset, sizeof(OffsetType));
+							foundNotDeletedSlot = true;
+							break;
+						}
+					}
+					//If all the slot after current slot were deleted, we will look forward to generate the offset of current slot
+					if (!foundNotDeletedSlot)
+					{
+						//Whether current slot is the first slot in the slot table
+						//If not, the slotOffset = previousSlotOffset + previousSlotSize
+						if (i == 0)
+						{
+							OffsetType targetSlotOffset = sizeof(OffsetType);
+							memcpy(data + PAGE_SIZE - sizeof(OffsetType) * (i + 2), &targetSlotOffset, sizeof(OffsetType));
+						}
+						else
+						{
+							OffsetType previousSlotOffset;
+							memcpy(&previousSlotOffset, data + PAGE_SIZE - sizeof(OffsetType) * (i + 1), sizeof(OffsetType));
+							OffsetType previousSlotSize;
+							memcpy(&previousSlotSize, data + previousSlotOffset, sizeof(OffsetType));
+							OffsetType targetSlotOffset = previousSlotOffset + previousSlotSize;
+							memcpy(data + PAGE_SIZE - sizeof(OffsetType) * (i + 2), &targetSlotOffset, sizeof(OffsetType));
+						}
+					}
 				}
 				else
 				{
@@ -485,8 +515,24 @@ RC RecordBasedFileManager::deleteRecord(FileHandle &fileHandle, const vector<Att
 	//Delete both the tombstone and real record
 	if (rid.pageNum != finalRid.pageNum || rid.slotNum != finalRid.slotNum)
 	{
-		deleteRecord(fileHandle, recordDescriptor, finalRid);
-		fileHandle.readPage(rid.pageNum, finalPage);
+		status = deleteRecord(fileHandle, recordDescriptor, finalRid);
+		if (status == -1)
+		{
+#ifdef DEBUG
+			cerr << "Cannot delete real record when deleting record." << endl;
+#endif
+			free(finalPage);
+			return -1;
+		}
+		status = fileHandle.readPage(rid.pageNum, finalPage);
+		if (status == -1)
+		{
+#ifdef DEBUG
+			cerr << "Cannot read page of tombstone when deleting record." << endl;
+#endif
+			free(finalPage);
+			return -1;
+		}
 	}
 	PageNum pageNum = rid.pageNum;
 	unsigned int slotNum = rid.slotNum;
@@ -556,10 +602,28 @@ void RecordBasedFileManager::moveSlots(const OffsetType targetOffset, const Offs
 	memcpy(&slotCount, pageData + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
 	if (startSlot > slotCount - 1)
 		return;
+	//Find the first undeleted slot in this range ([startSlot, endSlot])
+	bool foundStartSlot = false;
 	OffsetType startOffset;
-	memcpy(&startOffset, pageData + PAGE_SIZE - sizeof(OffsetType) * (startSlot + 2), sizeof(OffsetType));
+	for (OffsetType i = startSlot; i <= endSlot; i++)
+	{
+		memcpy(&startOffset, pageData + PAGE_SIZE - sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
+		if (startOffset != DELETEDSLOT)
+		{
+			foundStartSlot = true;
+			break;
+		}
+	}
+	//If all the slots in this range has been deleted before
+	if (!foundStartSlot)
+		return;
 	OffsetType endOffset;
-	memcpy(&endOffset, pageData + PAGE_SIZE - sizeof(OffsetType) * (endSlot + 2), sizeof(OffsetType));
+	for (OffsetType i = endSlot; i >= startSlot; i--)
+	{
+		memcpy(&endOffset, pageData + PAGE_SIZE - sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
+		if (endOffset != DELETEDSLOT)
+			break;
+	}
 	OffsetType endSlotSize;
 	memcpy(&endSlotSize, pageData + endOffset, sizeof(OffsetType));
 	endOffset += endSlotSize;
@@ -578,12 +642,6 @@ void RecordBasedFileManager::moveSlots(const OffsetType targetOffset, const Offs
 			memcpy(pageData + PAGE_SIZE - sizeof(OffsetType) * (i + 2), &currentSlotOffset, sizeof(OffsetType));
 		}
 	}
-
-	//Change total size of the page
-	OffsetType pageSize;
-	memcpy(&pageSize, pageData, sizeof(OffsetType));
-	pageSize += deltaOffset;
-	memcpy(pageData, &pageSize, sizeof(OffsetType));
 }
 
 RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Attribute> &recordDescriptor, const void *data, const RID &rid)
