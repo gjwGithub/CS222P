@@ -39,20 +39,23 @@ RC PagedFileManager::createFile(const string &fileName)
     }
 
 	//Create metadata in page 0
-	int readPageCounter = 0;
-	int writePageCounter = 0;
-	int appendPageCounter = 0;
-	PageNum pageNum = 0;
+	unsigned readPageCounter = 0;
+	unsigned writePageCounter = 0;
+	unsigned appendPageCounter = 0;
+	unsigned pageNum = 0;
+	unsigned insertCount = 0;
 	char* metaData = (char*)calloc(PAGE_SIZE, 1);
 	OffsetType offset = 0;
-	memcpy(metaData + offset, &readPageCounter, sizeof(int));
-	offset += sizeof(int);
-	memcpy(metaData + offset, &writePageCounter, sizeof(int));
-	offset += sizeof(int);
-	memcpy(metaData + offset, &appendPageCounter, sizeof(int));
-	offset += sizeof(int);
-	memcpy(metaData + offset, &pageNum, sizeof(PageNum));
-	offset += sizeof(PageNum);
+	memcpy(metaData + offset, &readPageCounter, sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(metaData + offset, &writePageCounter, sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(metaData + offset, &appendPageCounter, sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(metaData + offset, &pageNum, sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(metaData + offset, &insertCount, sizeof(unsigned));
+	offset += sizeof(unsigned);
 	size_t writeSize = fwrite(metaData, 1, PAGE_SIZE, file);
 	if (writeSize != PAGE_SIZE)
 	{
