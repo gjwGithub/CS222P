@@ -659,6 +659,7 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 #ifdef DEBUG
 		cerr << "Cannot traverse to final slot when updating record." << endl;
 #endif
+		free(fieldInfo);
 		free(finalPage);
 		return -1;
 	}
@@ -738,6 +739,7 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 #ifdef DEBUG
 				cerr << "Cannot insert a record into another page when updating a record exceeds the size of page" << endl;
 #endif
+				free(fieldInfo);
 				free(finalPage);
 				return -1;
 			}
@@ -754,6 +756,7 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 #ifdef DEBUG
 					cerr << "Cannot read the start page " << startPageNum << " when updating record." << endl;
 #endif
+					free(fieldInfo);
 					free(startPage);
 					free(finalPage);
 					return -1;
@@ -770,6 +773,7 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 #ifdef DEBUG
 					cerr << "Cannot delete the final record when updating record." << endl;
 #endif
+					free(fieldInfo);
 					free(startPage);
 					free(finalPage);
 					return -1;
@@ -780,6 +784,7 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 #ifdef DEBUG
 					cerr << "Cannot write the start page " << startPageNum << " when updating record." << endl;
 #endif
+					free(fieldInfo);
 					free(startPage);
 					free(finalPage);
 					return -1;
@@ -794,6 +799,7 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 #ifdef DEBUG
 					cerr << "Cannot read the insert page " << newRid.pageNum << " when updating record." << endl;
 #endif
+					free(fieldInfo);
 					free(insertRecordPage);
 					free(finalPage);
 					return -1;
@@ -808,10 +814,12 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 #ifdef DEBUG
 					cerr << "Cannot write the insert page " << newRid.pageNum << " when updating record." << endl;
 #endif
+					free(fieldInfo);
 					free(insertRecordPage);
 					free(finalPage);
 					return -1;
 				}
+				free(fieldInfo);
 				free(insertRecordPage);
 				free(finalPage);
 				return 0;
@@ -846,9 +854,11 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 #ifdef DEBUG
 		cerr << "Cannot write page back when updating record." << endl;
 #endif
+		free(fieldInfo);
 		free(finalPage);
 		return -1;
 	}
+	free(fieldInfo);
 	free(finalPage);
 	return 0;
 }
