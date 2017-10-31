@@ -64,8 +64,6 @@ RC RelationManager::createCatalog()
 
     RID rid; 
     fm_table->insertRecord(fh_table,attrs,tuple,rid);
-    cout<<"table table page: "<<rid.pageNum<<endl;
-    cout<<"table table slot: "<<rid.slotNum<<endl;
     free(tuple);
 
     tableName="Columns";
@@ -77,8 +75,6 @@ RC RelationManager::createCatalog()
     free(nullsIndicator);
     
     fm_table->insertRecord(fh_table,attrs,tuple,rid);
-    cout<<"cols table page: "<<rid.pageNum<<endl;
-    cout<<"cols table slot: "<<rid.slotNum<<endl;
     free(tuple);
     fm_table->closeFile(fh_table);
 
@@ -122,8 +118,6 @@ RC RelationManager::createCatalog()
         tupleSize=0;
         prepareTuple_cols(5, nullsIndicator1, 0, attrs[i].name.size(), attrs[i].name, attrs[i].type, attrs[i].length, i+1,tuple1,&tupleSize);
         fm_table->insertRecord(fh_table,attrs1,tuple1,rid);
-        cout<<"table cols page: "<<rid.pageNum<<endl;
-        cout<<"table cols slot: "<<rid.slotNum<<endl;
         free(tuple1);
         free(nullsIndicator1);
     }
@@ -136,8 +130,6 @@ RC RelationManager::createCatalog()
         tupleSize=0;
         prepareTuple_cols(5, nullsIndicator1, 1, attrs1[i].name.size(), attrs1[i].name, attrs1[i].type, attrs1[i].length, i+1,tuple1,&tupleSize);
         fm_table->insertRecord(fh_table,attrs1,tuple1,rid);
-        cout<<"cols  cols page: "<<rid.pageNum<<endl;
-        cout<<"cols cols slot: "<<rid.slotNum<<endl;
         free(tuple1);
         free(nullsIndicator1);
     }
@@ -184,7 +176,6 @@ RC RelationManager::createTable(const string &tableName, const vector<Attribute>
     attrs0.push_back(attr0);
     fm_table->openFile("Tables", fh_table);
     int table_ID=fh_table.insertCount;
-    cout<<"table_id"<<table_ID<<endl;
     void *tuple = malloc(200);
     int nullAttributesIndicatorActualSize = ceil((double) 4/ CHAR_BIT);
     unsigned char *nullsIndicator = (unsigned char *) malloc(nullAttributesIndicatorActualSize);
@@ -194,8 +185,6 @@ RC RelationManager::createTable(const string &tableName, const vector<Attribute>
 
     RID rid; 
     fm_table->insertRecord(fh_table,attrs0,tuple,rid);
-    cout<<"normal table page: "<<rid.pageNum<<endl;
-    cout<<"normal table slot: "<<rid.slotNum<<endl;
     free(tuple);
     fm_table->closeFile(fh_table);
     vector<Attribute> attrs1;
@@ -234,12 +223,9 @@ RC RelationManager::createTable(const string &tableName, const vector<Attribute>
         tupleSize=0;
         prepareTuple_cols(5, nullsIndicator1, table_ID, attrs[i].name.size(), attrs[i].name, attrs[i].type, attrs[i].length, i+1,tuple1,&tupleSize);
         fm_table->insertRecord(fh_table,attrs1,tuple1,rid);
-        cout<<"normal cols page: "<<rid.pageNum<<endl;
-        cout<<"normal cols slot: "<<rid.slotNum<<endl;
         free(tuple1);
         free(nullsIndicator1);
     }
-    cout<<fh_table.getNumberOfPages();
     fm_table->closeFile(fh_table);
     return 0;
 }
@@ -269,7 +255,6 @@ RC RelationManager::deleteTable(const string &tableName)
     fm_table->closeFile(fh_table);
     rmsi.close();
     RC qq1=deleteTuple("Tables",rid);  //delete
-    cout<<"delete table pagenum:"<<rid.pageNum<<"data table slotNum"<<rid.slotNum<<endl;
 
     vector<string> attribute1;
     attribute1.push_back("column-name");
@@ -293,7 +278,6 @@ RC RelationManager::deleteTable(const string &tableName)
 
     for(int i=0;i<vector_rid.size();i++){
         RC qq2=deleteTuple("Columns",vector_rid[i]);
-        cout<<"delete table pagenum:"<<vector_rid[i].pageNum<<"data table slotNum"<<vector_rid[i].slotNum<<endl;
     }
     return 0;
 }
