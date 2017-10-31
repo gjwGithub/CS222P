@@ -16,10 +16,11 @@ class RM_ScanIterator {
 public:
   RM_ScanIterator() {};
   ~RM_ScanIterator() {};
-
+  RBFM_ScanIterator rbfm_ScanIterator;
   // "data" follows the same format as RelationManager::insertTuple()
-  RC getNextTuple(RID &rid, void *data) { return RM_EOF; };
-  RC close() { return -1; };
+  RC getNextTuple(RID &rid, void *data) { 
+    return rbfm_ScanIterator.getNextRecord(rid,data); };
+  RC close() { return rbfm_ScanIterator.close(); };
 };
 
 
@@ -27,6 +28,9 @@ public:
 class RelationManager
 {
 public:
+  RecordBasedFileManager *fm_table;
+  FileHandle fh_table;
+  FileHandle fh_col;
   static RelationManager* instance();
 
   RC createCatalog();
@@ -52,7 +56,8 @@ public:
   RC printTuple(const vector<Attribute> &attrs, const void *data);
 
   RC readAttribute(const string &tableName, const RID &rid, const string &attributeName, void *data);
-
+  void prepareTuple_tables(int attributeCount, unsigned char *nullAttributesIndicator, const int Table_ID, const int lengthOftable, const string &tableName, const int lengthOffie,const string &fieldName, const int isSys, void *buffer, int *tupleSize);
+  void prepareTuple_cols(int attributeCount, unsigned char *nullAttributesIndicator, const int Table_ID, const int lengthOffield, const string &fieldName, const int fieldOfType, const int max_length, const int field_ID, void *buffer, int *tupleSize);
   // Scan returns an iterator to allow the caller to go through the results one by one.
   // Do not store entire results in the scan iterator.
   RC scan(const string &tableName,

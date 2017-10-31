@@ -16,7 +16,7 @@ RC RM_TEST_EXTRA_2(const string &tableName, const int nameLength, const string &
     Attribute attr;
     attr.name = "SSN";
     attr.type = TypeInt;
-    attr.length = 9;
+    attr.length = 4;
     RC rc = rm->addAttribute(tableName, attr);
     assert(rc == success && "RelationManager::addAttribute() should not fail.");
     
