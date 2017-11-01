@@ -77,6 +77,8 @@ public:
 	  currentSlotNum = -1;
 	  maxPageNum = 0;
 	  end = true; 
+	  versionTable.clear();
+	  attributeNames.clear();
 	  return 0; 
   }
 
@@ -120,6 +122,8 @@ public:
   }
   void setRecordDescriptor(const vector<Attribute> &recordDescriptor) { this->recordDescriptor = recordDescriptor; }
   void setFileHandle(FileHandle &fileHandle) { this->fileHandle = &fileHandle; }
+  void setVersionTable(const vector<vector<Attribute>> &versionTable) { this->versionTable = versionTable; }
+  void setAttributeNames(const vector<string> &attributeNames) { this->attributeNames = attributeNames; }
 
 private:
 	PageNum maxPageNum;
@@ -131,6 +135,9 @@ private:
 	OffsetType conditionField;
 	CompOp compOp;
 	void *value;
+
+	vector<vector<Attribute>> versionTable;
+	vector<string> attributeNames;
 };
 
 
@@ -206,5 +213,7 @@ protected:
 private:
   static RecordBasedFileManager *_rbf_manager;
 };
+
+#include "../rm/rm.h"
 
 #endif

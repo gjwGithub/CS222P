@@ -28,19 +28,23 @@ The 4th column (is_sys) represent if the table is system table
 
 Columns structure
    
--------------------------------
-ID| column name | column type |
--------------------------------
-1 | table-id    |     int     |
--------------------------------
-2 | column-name | varchar(50) |
--------------------------------
-3 | column-type |     int     |
--------------------------------
-4 |column-length|     int     |
--------------------------------
-5 | column_id   |     int     |
--------------------------------
+-----------------------------------
+ID|   column name   | column type |
+-----------------------------------
+1 |    table-id     |     int     |
+-----------------------------------
+2 |   column-name   | varchar(50) |
+-----------------------------------
+3 |   column-type   |     int     |
+-----------------------------------
+4 |  column-length  |     int     |
+-----------------------------------
+5 | column-position |     int     |
+-----------------------------------
+6 |  startVersion   |     int     |
+-----------------------------------
+7 |   endVersion    |     int     |
+-----------------------------------
 
 3. Internal Record Format
 - Show your record format design and describe how your design satisfies O(1) field access. If not, just mention that your team hasn't implemented this feature.
@@ -48,12 +52,12 @@ ID| column name | column type |
 - Describe how you deal with an update and delete.
 (1) In each slot of a record, first I use 2 bytes to store the size of this slot. Then I use 2 bytes to store the number of fields in this record (including the null fields). After that, I store a table of the offset of each field, which size is 2n bytes. If a field is null, its offset will be -1. In the end, I store the original data obtained from given data (excluding the null field indicator). As we know the offset of the nth field, we can access the nth field in O(1) time.
 A brief structure of record format design:
-0          2            3          5              7              9                             n
-------------------------------------------------------------------------------------------------
-| slotSize | updateMark | fieldNum | fieldOffset1 | fieldOffset2 | ... | field1 | field2 | ... |
-------------------------------------------------------------------------------------------------
-|                                                                      ^
------------------------------ fieldOffset1 ----------------------------|
+0          2            3         4          6              8             10                             n
+----------------------------------------------------------------------------------------------------------
+| slotSize | updateMark | version | fieldNum | fieldOffset1 | fieldOffset2 | ... | field1 | field2 | ... |
+----------------------------------------------------------------------------------------------------------
+|                                                                                ^
+---------------------------------- fieldOffset1 ---------------------------------|
 (2) I use the same method as the one in given data to store a VarChar field. That is, first use a nameLength of 4 bytes to show how long is that string, and then store the content of that string continuously.
 (3) For updating record, first I will check the sizes of old record and new record. If the size of new record is smaller than or equal to that of old record, I will update the old record in the same location and update the slot table. Then I will move the other record in the back forward to reduce the space hole. If the size of new record is larger than that of old record, first I will remove the fieldInfo and data of old record, and change the value of updateMark into 1. Then I will insert this record in another page, change the updateMark of that record into 2, and write the returned RID in the back of the original slot. If we are updataing a record containing a tombstone, we will first delete its child record, insert a new record, and update the new RID in the original slot.
 For deleting record, I will remove that slot, move forward other slots in the back, and update the slot table.
@@ -87,6 +91,9 @@ A brief structure of metadata format design:
 
 6. Implementation Detail
 - Other implementation details goes here.
+We also implemented the add attribute and drop attribute function. We use the version schema to control the version of each field. In the column table, we have two fields: startVersion and endVersion. startVersion indicates the version that the field begins to appear, and endVersion indicates the last version that field appears.
+Every time when we add an attribute in a table, we will add 1 to the current version of that table, and refresh the endVersion of all the field in that table. Then we will insert a new field in that table, which startVersion = endVersion = currentVersion.
+Every time when we drop an attribute in a table, we will add 1 to the current version of that table, and refresh the endVersion of all the field except the dropped field in that table. But we will still keep the dropped field in the table for future scan.
 
 
 7. Other (optional)

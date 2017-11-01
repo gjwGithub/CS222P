@@ -44,6 +44,7 @@ RC PagedFileManager::createFile(const string &fileName)
 	unsigned appendPageCounter = 0;
 	unsigned pageNum = 0;
 	unsigned insertCount = 0;
+	unsigned currentVersion = 0;
 	char* metaData = (char*)calloc(PAGE_SIZE, 1);
 	OffsetType offset = 0;
 	memcpy(metaData + offset, &readPageCounter, sizeof(unsigned));
@@ -55,6 +56,8 @@ RC PagedFileManager::createFile(const string &fileName)
 	memcpy(metaData + offset, &pageNum, sizeof(unsigned));
 	offset += sizeof(unsigned);
 	memcpy(metaData + offset, &insertCount, sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(metaData + offset, &currentVersion, sizeof(unsigned));
 	offset += sizeof(unsigned);
 	size_t writeSize = fwrite(metaData, 1, PAGE_SIZE, file);
 	if (writeSize != PAGE_SIZE)
@@ -129,7 +132,7 @@ RC PagedFileManager::openFile(const string &fileName, FileHandle &fileHandle)
 {
 	if (fileHandle.getFile())
 	{
-		int status = fclose(fileHandle.getFile());
+		int status = closeFile(fileHandle);
 		if (status)
 		{
 #ifdef DEBUG
@@ -413,6 +416,8 @@ RC FileHandle::readMetaData()
 	offset += sizeof(unsigned);
 	memcpy(&(this->insertCount), data + offset, sizeof(unsigned));
 	offset += sizeof(unsigned);
+	memcpy(&(this->currentVersion), data + offset, sizeof(unsigned));
+	offset += sizeof(unsigned);
 	free(data);
 	return 0;
 }
@@ -445,6 +450,8 @@ RC FileHandle::writeMetaData()
 	memcpy(data + offset, &(this->pageCount), sizeof(unsigned));
 	offset += sizeof(unsigned);
 	memcpy(data + offset, &(this->insertCount), sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(data + offset, &(this->currentVersion), sizeof(unsigned));
 	offset += sizeof(unsigned);
 	size_t writeSize = fwrite(data, 1, PAGE_SIZE, this->file);
 	if (writeSize != PAGE_SIZE)
@@ -493,5 +500,5 @@ RC FileHandle::generateAllPagesSize(vector<OffsetType> &allPagesSize)
 
 MarkType FileHandle::getCurrentVersion()
 {
-	return 0;
+	return this->currentVersion;
 }

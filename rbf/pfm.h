@@ -51,6 +51,7 @@ public:
     unsigned appendPageCounter;
 	unsigned pageCount;
 	unsigned insertCount;
+	unsigned currentVersion;
 
     FILE *file;
     RC setFile(FILE *file);
