@@ -348,14 +348,14 @@ RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const vector<Attri
 	unsigned char *nullFieldsIndicator = (unsigned char*)malloc(nullFieldsIndicatorActualSize);
 	memset(nullFieldsIndicator, 0, nullFieldsIndicatorActualSize);
 	
-	vector<Attribute> versionTable = RelationManager::instance()->getVersionTable(version);
+	vector<Attribute>* versionTable = RelationManager::instance()->getVersionTable(version);
 	vector<int> outputFields;
 	for (size_t i = 0; i < recordDescriptor.size(); i++)
 	{
 		bool foundField = false;
-		for (size_t j = 0; j < versionTable.size(); j++)
+		for (size_t j = 0; j < versionTable->size(); j++)
 		{
-			if (recordDescriptor[i].name == versionTable[j].name)
+			if (recordDescriptor[i].name == versionTable->at(j).name)
 			{
 				foundField = true;
 				outputFields.push_back(j);
@@ -986,17 +986,17 @@ RC RecordBasedFileManager::readAttribute(FileHandle &fileHandle, const vector<At
 	memcpy(&slotOffset, finalPage + PAGE_SIZE - sizeof(OffsetType) * (slotNum + 2), sizeof(OffsetType));
 	MarkType version;
 	memcpy(&version, finalPage + slotOffset + sizeof(OffsetType) + sizeof(MarkType), sizeof(MarkType));
-	vector<Attribute> versionTable = RelationManager::instance()->getVersionTable(version);
-	for (size_t i = 0; i < versionTable.size(); i++)
+	vector<Attribute> *versionTable = RelationManager::instance()->getVersionTable(version);
+	for (size_t i = 0; i < versionTable->size(); i++)
 	{
-		if (versionTable[i].name == attributeName)
+		if (versionTable->at(i).name == attributeName)
 		{
 			OffsetType attrOffset;
 			memcpy(&attrOffset, finalPage + slotOffset + 2 * sizeof(MarkType) + sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
 			if (attrOffset != NULLFIELD)
 			{
 				OffsetType attrLength;
-				if (i == versionTable.size() - 1)
+				if (i == versionTable->size() - 1)
 				{
 					OffsetType slotSize;
 					memcpy(&slotSize, finalPage + slotOffset, sizeof(OffsetType));

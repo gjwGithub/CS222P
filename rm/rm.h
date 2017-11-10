@@ -4,7 +4,7 @@
 
 #include <string>
 #include <vector>
-
+#include <unordered_map>
 #include "../rbf/rbfm.h"
 
 using namespace std;
@@ -31,6 +31,9 @@ public:
   RecordBasedFileManager *fm_table;
   FileHandle fh_table;
   FileHandle fh_col;
+  unordered_map<string, vector<Attribute>> map_attributes;
+  unordered_map<string, vector<vector<Attribute>>> map_versionTable;
+
   static RelationManager* instance();
 
   RC createCatalog();
@@ -76,7 +79,7 @@ public:
   vector<vector<Attribute>> generateVersionTable(const string &tableName);
 
   vector<vector<Attribute>> versionTable;
-  vector<Attribute> getVersionTable(const int version);
+  vector<Attribute>* getVersionTable(const int version);
 
 protected:
   RelationManager();
