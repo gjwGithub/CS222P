@@ -72,6 +72,8 @@ public:
 	vector<OffsetType> allPagesSize;
 	RC generateAllPagesSize(vector<OffsetType> &allPagesSize);
 	MarkType getCurrentVersion();
+
+	string currentFileName;
 }; 
 
 #endif

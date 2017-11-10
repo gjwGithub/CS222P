@@ -162,12 +162,22 @@ RC PagedFileManager::openFile(const string &fileName, FileHandle &fileHandle)
 #endif
 		return -1;
 	}
+	status = fileHandle.generateAllPagesSize(fileHandle.allPagesSize);
+	if (status == -1)
+	{
+#ifdef DEBUG
+		cerr << "Generate all page sizes error in open file" << endl;
+#endif
+		return -1;
+	}
+	fileHandle.currentFileName = fileName;
     return 0;
 }
 
 
 RC PagedFileManager::closeFile(FileHandle &fileHandle)
 {
+	fileHandle.allPagesSize.clear();
 	FILE* file = fileHandle.getFile();
 	if (!file)
 	{
@@ -193,6 +203,7 @@ RC PagedFileManager::closeFile(FileHandle &fileHandle)
 		return -1;
 	}
 	fileHandle.setFile(NULL);
+	fileHandle.currentFileName = "";
     return 0;
 }
 
@@ -226,7 +237,7 @@ RC FileHandle::readPage(PageNum pageNum, void *data)
 	if (number <= pageNum)
 	{
 #ifdef DEBUG
-		cerr << "Page number oversizes while reading page" << endl;
+		cerr << "Page number " << pageNum << " oversizes " << number << " while reading page" << endl;
 #endif
 		return -1;
 	}

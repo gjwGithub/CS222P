@@ -13,6 +13,8 @@ RelationManager::RelationManager()
 
 RelationManager::~RelationManager()
 {
+	if (fh_table.currentFileName != "")
+		fm_table->closeFile(fh_table);
 }
 
 RC RelationManager::createCatalog()
@@ -405,9 +407,13 @@ RC RelationManager::insertTuple(const string &tableName, const void *data, RID &
 	if (rel1 == -1)
 		return -1;
 
-	fm_table->openFile(tableName, fh_table);
+	if (tableName != fh_table.currentFileName)
+	{
+		if (fh_table.currentFileName != "")
+			fm_table->closeFile(fh_table);
+		fm_table->openFile(tableName, fh_table);
+	}
 	RC rel = fm_table->insertRecord(fh_table, attributes, data, rid);
-	fm_table->closeFile(fh_table);
 	return rel;
 }
 
@@ -418,9 +424,13 @@ RC RelationManager::deleteTuple(const string &tableName, const RID &rid)
 	if (rel1 == -1)
 		return -1;
 
-	fm_table->openFile(tableName, fh_table);
+	if (tableName != fh_table.currentFileName)
+	{
+		if (fh_table.currentFileName != "")
+			fm_table->closeFile(fh_table);
+		fm_table->openFile(tableName, fh_table);
+	}
 	RC rel = fm_table->deleteRecord(fh_table, attributes, rid);
-	fm_table->closeFile(fh_table);
 	return rel;
 }
 
@@ -431,9 +441,13 @@ RC RelationManager::updateTuple(const string &tableName, const void *data, const
 	if (rel1 == -1)
 		return -1;
 
-	fm_table->openFile(tableName, fh_table);
+	if (tableName != fh_table.currentFileName)
+	{
+		if (fh_table.currentFileName != "")
+			fm_table->closeFile(fh_table);
+		fm_table->openFile(tableName, fh_table);
+	}
 	RC rel = fm_table->updateRecord(fh_table, attributes, data, rid);
-	fm_table->closeFile(fh_table);
 	return rel;
 }
 
@@ -447,9 +461,13 @@ RC RelationManager::readTuple(const string &tableName, const RID &rid, void *dat
 		return -1;
 
 	this->versionTable = generateVersionTable(tableName);
-	fm_table->openFile(tableName, fh_table);
+	if (tableName != fh_table.currentFileName)
+	{
+		if (fh_table.currentFileName != "")
+			fm_table->closeFile(fh_table);
+		fm_table->openFile(tableName, fh_table);
+	}
 	RC rel = fm_table->readRecord(fh_table, attributes, rid, data);
-	fm_table->closeFile(fh_table);
 	return rel;
 }
 
@@ -469,9 +487,13 @@ RC RelationManager::readAttribute(const string &tableName, const RID &rid, const
 		return -1;
 
 	this->versionTable = generateVersionTable(tableName);
-	fm_table->openFile(tableName, fh_table);
+	if (tableName != fh_table.currentFileName)
+	{
+		if (fh_table.currentFileName != "")
+			fm_table->closeFile(fh_table);
+		fm_table->openFile(tableName, fh_table);
+	}
 	RC rel = fm_table->readAttribute(fh_table, attributes, rid, attributeName, data);
-	fm_table->closeFile(fh_table);
 	return rel;
 }
 
@@ -952,7 +974,9 @@ vector<vector<Attribute>> RelationManager::generateVersionTable(const string &ta
 {
 	auto ite = map_versionTable.find(tableName);
 	if (ite != map_versionTable.end())
+	{
 		return ite->second;
+	}
 
 	if (tableName == "Tables")
 	{

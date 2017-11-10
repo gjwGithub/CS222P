@@ -27,13 +27,10 @@ RC RecordBasedFileManager::destroyFile(const string &fileName) {
 }
 
 RC RecordBasedFileManager::openFile(const string &fileName, FileHandle &fileHandle) {
-	RC status = PagedFileManager::instance()->openFile(fileName, fileHandle);
-	status |= fileHandle.generateAllPagesSize(fileHandle.allPagesSize);
-    return status;
+    return PagedFileManager::instance()->openFile(fileName, fileHandle);
 }
 
 RC RecordBasedFileManager::closeFile(FileHandle &fileHandle) {
-	fileHandle.allPagesSize.clear();
     return PagedFileManager::instance()->closeFile(fileHandle);
 }
 
