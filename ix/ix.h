@@ -8,6 +8,10 @@
 
 # define IX_EOF (-1)  // end of the index scan
 
+#define NULLNODE -1
+#define InternalNodeType 1
+#define LeafNodeType 2
+
 class IX_ScanIterator;
 class IXFileHandle;
 
@@ -90,6 +94,61 @@ class IXFileHandle {
 	// Put the current counter values of associated PF FileHandles into variables
 	RC collectCounterValues(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount);
 
+};
+
+struct LeafEntry
+{
+	void* key;
+	RID rid;
+};
+
+struct InternalEntry
+{
+	void* key;
+	Node* leftChild;
+	Node* rightChild;
+};
+
+class Node 
+{
+public:
+	bool isOverflow();
+	bool isUnderflow();
+public:
+	MarkType nodeType;
+	OffsetType nodeSize;
+	Node* parentPointer;
+	bool isDirty;
+	PageNum pageNum;
+	bool isLoaded;
+};
+
+class InternalNode: public Node 
+{
+public:
+	vector<InternalEntry> internalEntries;
+};
+
+class LeafNode: public Node 
+{
+public:
+	Node* rightPointer;
+	Node* overflowPointer;
+	vector<LeafEntry> leafEntries;
+};
+
+class BTree 
+{
+public:
+	void insertEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
+	void deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
+	LeafNode* searchEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
+	char* generatePage(const Node* node);
+	Node* generateNode(const char* data);
+public:
+	Node* root;
+	Node* smallestLeaf;
+	AttrType attrType;
 };
 
 #endif
