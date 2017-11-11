@@ -674,6 +674,9 @@ RC RelationManager::dropAttribute(const string &tableName, const string &attribu
 			fm_table->closeFile(fh_table);
 
 			fm_table->openFile("Columns", fh_table);
+
+			free(nullsIndicator);
+			free(tuple);
 		}
 		free(fieldName);
 	}
@@ -793,6 +796,9 @@ RC RelationManager::addAttribute(const string &tableName, const Attribute &attr)
 			fm_table->closeFile(fh_table);
 
 			fm_table->openFile("Columns", fh_table);
+
+			free(nullsIndicator);
+			free(tuple);
 		}
 
 		free(fieldName);
@@ -818,6 +824,8 @@ RC RelationManager::addAttribute(const string &tableName, const Attribute &attr)
 	if (rel == -1)
 		return -1;
 	fm_table->closeFile(fh_table);
+	free(nullsIndicator);
+	free(tuple);
 
 	auto ite = map_attributes.find(tableName);
 	if (ite != map_attributes.end())
