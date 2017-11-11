@@ -69,7 +69,6 @@ public:
   { 
 	  fileHandle = NULL;
 	  recordDescriptor.clear();
-	  outputFields.clear();
 	  conditionField = 0;
 	  compOp = CompOp::NO_OP;
 	  free(value);
@@ -88,7 +87,6 @@ public:
   void setMaxPageNum(PageNum maxPageNum) { this->maxPageNum = maxPageNum; }
   bool getEnd() { return end; }
   void setEnd(bool end) { this->end = end; }
-  vector<OffsetType>* getOutputFields() { return &(this->outputFields); }
   void setConditionField(OffsetType conditionField) { this->conditionField = conditionField; }
   void setCompOp(const CompOp compOp) { this->compOp = compOp; }
   void setValue(const void* value) 
@@ -131,7 +129,6 @@ private:
 
 	FileHandle* fileHandle;
 	vector<Attribute> recordDescriptor;
-	vector<OffsetType> outputFields;
 	OffsetType conditionField;
 	CompOp compOp;
 	void *value;

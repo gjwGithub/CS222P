@@ -393,24 +393,6 @@ RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const vector<Attri
 	}
 	memcpy(data, nullFieldsIndicator, nullFieldsIndicatorActualSize);
 
-	//for (OffsetType i = 0; i < fieldNum; i += 8)
-	//{
-	//	unsigned char nullFields = 0;
-	//	for (int j = 0; i + j < fieldNum && j < 8; j++)
-	//	{
-	//		string fieldName = recordDescriptor[i + j].name;
-
-	//		OffsetType fieldOffset;
-	//		memcpy(&fieldOffset, pageData + offset, sizeof(OffsetType));
-	//		offset += sizeof(OffsetType);
-	//		if (fieldOffset == NULLFIELD)
-	//			nullFields += 1 << (7 - j);
-	//	}
-	//	nullFieldsIndicator[i / 8] = nullFields;
-	//}
-	//memcpy(data, nullFieldsIndicator, nullFieldsIndicatorActualSize);
-	//OffsetType dataSize = slotSize - (offset - startOffset);
-	//memcpy((char*)data + nullFieldsIndicatorActualSize, pageData + offset, dataSize);
 	free(pageData);
 	free(nullFieldsIndicator);
 	return 0;
@@ -773,7 +755,7 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 			offset += fieldInfoSize;
 			int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);
 			memcpy(finalPage + offset, (char *)data + nullFieldsIndicatorActualSize, dataSize);
-			//Decrease the size of page by target slot size
+			//Increase the size of page by target slot size
 			OffsetType pageSize = fileHandle.allPagesSize[pageNum];
 			pageSize += newSlotSize - oldSlotSize;
 			memcpy(finalPage, &pageSize, sizeof(OffsetType));
@@ -839,39 +821,6 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 					return -1;
 				}
 				free(startPage);
-
-				//Modify the isUpdatedRecord mark in the inserted record
-				char* insertRecordPage = (char*)malloc(PAGE_SIZE);
-				status = fileHandle.readPage(newRid.pageNum, insertRecordPage);
-				if (status == -1)
-				{
-#ifdef DEBUG
-					cerr << "Cannot read the insert page " << newRid.pageNum << " when updating record." << endl;
-#endif
-					free(fieldInfo);
-					free(insertRecordPage);
-					free(finalPage);
-					return -1;
-				}
-				OffsetType insertSlotOffset;
-				memcpy(&insertSlotOffset, insertRecordPage + PAGE_SIZE - sizeof(OffsetType) * (newRid.slotNum + 2), sizeof(OffsetType));
-				MarkType isUpdatedRecord = UpdatedRecordMark::UpdatedRecord;
-				memcpy(insertRecordPage + insertSlotOffset + sizeof(OffsetType), &isUpdatedRecord, sizeof(MarkType));
-				status = fileHandle.writePage(newRid.pageNum, insertRecordPage);
-				if (status == -1)
-				{
-#ifdef DEBUG
-					cerr << "Cannot write the insert page " << newRid.pageNum << " when updating record." << endl;
-#endif
-					free(fieldInfo);
-					free(insertRecordPage);
-					free(finalPage);
-					return -1;
-				}
-				free(fieldInfo);
-				free(insertRecordPage);
-				free(finalPage);
-				return 0;
 			}
 			else
 			{
@@ -894,6 +843,44 @@ RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const vector<Att
 				pageSize += slotSize - oldSlotSize;
 				memcpy(finalPage, &pageSize, sizeof(OffsetType));
 				fileHandle.allPagesSize[pageNum] = pageSize;
+			}
+
+			//Modify the isUpdatedRecord mark in the inserted record
+			char* insertRecordPage = (char*)malloc(PAGE_SIZE);
+			status = fileHandle.readPage(newRid.pageNum, insertRecordPage);
+			if (status == -1)
+			{
+#ifdef DEBUG
+				cerr << "Cannot read the insert page " << newRid.pageNum << " when updating record." << endl;
+#endif
+				free(fieldInfo);
+				free(insertRecordPage);
+				free(finalPage);
+				return -1;
+			}
+			OffsetType insertSlotOffset;
+			memcpy(&insertSlotOffset, insertRecordPage + PAGE_SIZE - sizeof(OffsetType) * (newRid.slotNum + 2), sizeof(OffsetType));
+			MarkType isUpdatedRecord = UpdatedRecordMark::UpdatedRecord;
+			memcpy(insertRecordPage + insertSlotOffset + sizeof(OffsetType), &isUpdatedRecord, sizeof(MarkType));
+			status = fileHandle.writePage(newRid.pageNum, insertRecordPage);
+			if (status == -1)
+			{
+#ifdef DEBUG
+				cerr << "Cannot write the insert page " << newRid.pageNum << " when updating record." << endl;
+#endif
+				free(fieldInfo);
+				free(insertRecordPage);
+				free(finalPage);
+				return -1;
+			}
+			free(insertRecordPage);
+
+			//If we are not updating the record in its original page and slot, we do not need to write back the final page since we deleted an record in that page before.
+			if (rid.pageNum != finalRid.pageNum || rid.slotNum != finalRid.slotNum)
+			{
+				free(fieldInfo);
+				free(finalPage);
+				return 0;
 			}
 		}
 	}
@@ -1115,20 +1102,21 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 								free(pageData);
 								return -1;
 							}
+							memcpy(&slotOffset, pageData + PAGE_SIZE - sizeof(OffsetType) * (finalRid.slotNum + 2), sizeof(OffsetType));
 						}
 
 						MarkType version;
 						memcpy(&version, pageData + slotOffset + sizeof(OffsetType) + sizeof(MarkType), sizeof(MarkType));
 						
-						//Get the position of the previous output fields
+						//Get the position of the previous condition field
 						bool findConditionField = false;
 						OffsetType oldConditionField = NULLFIELD;
-						for (size_t i = 0; i < versionTable[version].size(); i++)
+						for (size_t k = 0; k < versionTable[version].size(); k++)
 						{
 							//Get the id of condition field
-							if (this->conditionField != NULLFIELD && versionTable[version][i].name == recordDescriptor.at(this->conditionField).name)
+							if (this->conditionField != NULLFIELD && versionTable[version][k].name == recordDescriptor.at(this->conditionField).name)
 							{
-								oldConditionField = (OffsetType)i;
+								oldConditionField = (OffsetType)k;
 								findConditionField = true;
 								break;
 							}
@@ -1136,22 +1124,37 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 						//If the condition field only appears in new schema
 						if (this->conditionField != NULLFIELD && !findConditionField)
 							oldConditionField = NULLFIELD;
-						this->outputFields.clear();
-						for (size_t i = 0; i < this->attributeNames.size(); i++)
+						//Get the positions of the output fields in the previous record
+						vector<OffsetType> outputFieldsOldPositions;
+						for (size_t k = 0; k < this->attributeNames.size(); k++)
 						{
 							bool findOutputField = false;
-							for (size_t j = 0; j < versionTable[version].size(); j++)
+							for (size_t l = 0; l < versionTable[version].size(); l++)
 							{
 								//Add the id of the field that we need to project
-								if (versionTable[version][j].name == this->attributeNames[i])
+								if (versionTable[version][l].name == this->attributeNames[k])
 								{
-									this->outputFields.push_back(j);
+									outputFieldsOldPositions.push_back(l);
 									findOutputField = true;
 									break;
 								}
 							}
 							if (!findOutputField)
-								this->outputFields.push_back(NULLFIELD);
+								outputFieldsOldPositions.push_back(NULLFIELD);
+						}
+						//Get the positions of the output fields in the current record
+						vector<OffsetType> outputFieldsCurrentPositions;
+						for (size_t k = 0; k < this->attributeNames.size(); k++)
+						{
+							for (size_t l = 0; l < recordDescriptor.size(); l++)
+							{
+								//Add the id of the field that we need to project
+								if (recordDescriptor[l].name == this->attributeNames[k])
+								{
+									outputFieldsCurrentPositions.push_back(l);
+									break;
+								}
+							}
 						}
 
 						//Whether the query has a condition
@@ -1189,29 +1192,29 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 						}
 
 						//Get all the projected fields in the record and combine them
-						int nullFieldsIndicatorActualSize = ceil((double)outputFields.size() / CHAR_BIT);
+						int nullFieldsIndicatorActualSize = ceil((double)outputFieldsOldPositions.size() / CHAR_BIT);
 						unsigned char *nullFieldsIndicator = (unsigned char*)malloc(nullFieldsIndicatorActualSize);
 						unsigned char nullFields = 0;
 						OffsetType dataOffset = nullFieldsIndicatorActualSize;
-						for (size_t k = 0; k < outputFields.size(); k++)
+						for (size_t k = 0; k < outputFieldsOldPositions.size(); k++)
 						{
 							if (k % 8 == 0)
 								nullFields = 0;
-							if (outputFields[k] == NULLFIELD)
+							if (outputFieldsOldPositions[k] == NULLFIELD)
 							{
 								nullFields += 1 << (7 - k % 8);
 								nullFieldsIndicator[k / 8] = nullFields;
 								continue;
 							}
 							OffsetType fieldOffset;
-							memcpy(&fieldOffset, pageData + slotOffset + 2 * sizeof(MarkType) + sizeof(OffsetType) * (2 + outputFields[k]), sizeof(OffsetType));
+							memcpy(&fieldOffset, pageData + slotOffset + 2 * sizeof(MarkType) + sizeof(OffsetType) * (2 + outputFieldsOldPositions[k]), sizeof(OffsetType));
 							if (fieldOffset == NULLFIELD)
 							{
 								nullFields += 1 << (7 - k % 8);
 							}
 							else
 							{
-								AttrType attrType = recordDescriptor.at(outputFields[k]).type;
+								AttrType attrType = recordDescriptor.at(outputFieldsCurrentPositions[k]).type;
 								int fieldLength = 0;
 								if (attrType == TypeInt)
 									fieldLength = sizeof(int);
