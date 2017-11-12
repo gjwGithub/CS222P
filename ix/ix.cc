@@ -41,7 +41,16 @@ RC IndexManager::closeFile(IXFileHandle &ixfileHandle)
 
 RC IndexManager::insertEntry(IXFileHandle &ixfileHandle, const Attribute &attribute, const void *key, const RID &rid)
 {
-    return -1;
+    LeafEntry leafEntry={key,rid};
+    if(tree==NULL){
+    	tree=new BTree();
+    	tree->attrType=attribute.type;
+    	RC rel=tree->insertEntry(ixfileHandle,leafEntry);
+    	return rel;
+    }else{
+    	RC rel=tree->insertEntry(ixfileHandle,leafEntry);
+    	return rel;
+    }
 }
 
 RC IndexManager::deleteEntry(IXFileHandle &ixfileHandle, const Attribute &attribute, const void *key, const RID &rid)
@@ -144,6 +153,33 @@ BTree::~BTree()
 {
 	delete this->root;
 	delete this->smallestLeaf;
+}
+void BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry pair){
+	if(root==NULL){
+		//set node fields
+		Node new_node=new LeafNode();   
+		new_node.leafEntries.push_back(pair);
+		new_node.nodeType=LeafNodeType;
+		int entry_length;
+		if(attrType==TypeVarChar){
+			void * key1=pair.key;
+			int var_length;
+			memcpy(&var_length,(char *)pair.key,4);
+			entry_length=4+var_length+8;
+		}else{
+			entry_length=12;
+		}
+		new_node.nodeSize=nodeSize+entry_length;
+		//set tree fields
+		root=*new_node;
+		smallestLeaf=*new_node;
+		void* new_page=malloc(PAGE_SIZE);
+		new_page=generatePage(new_node);
+		ixfileHandle.appendPage(new_page);
+	}else{
+
+	}
+
 }
 
 char* BTree::generatePage(const Node* node)

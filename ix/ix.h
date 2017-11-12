@@ -1,4 +1,4 @@
-#ifndef _ix_h_
+ #ifndef _ix_h_
 #define _ix_h_
 
 #include <vector>
