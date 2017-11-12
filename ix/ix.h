@@ -15,7 +15,7 @@
 
 class IX_ScanIterator;
 class IXFileHandle;
-
+class BTree;
 class IndexManager {
 
     public:
@@ -50,6 +50,7 @@ class IndexManager {
 
         // Print the B+ tree in pre-order (in a JSON record format)
         void printBtree(IXFileHandle &ixfileHandle, const Attribute &attribute) const;
+        BTree* tree;
 
     protected:
         IndexManager();
@@ -85,9 +86,13 @@ class IXFileHandle {
     unsigned ixReadPageCounter;
     unsigned ixWritePageCounter;
     unsigned ixAppendPageCounter;
-
+    FileHandle handle;
     // Constructor
     IXFileHandle();
+
+    RC readPage(PageNum pageNum, void *data);                             // Get a specific page
+    RC writePage(PageNum pageNum, const void *data);                      // Write a specific page
+    RC appendPage(const void *data);                                      // Append a specific page
 
     // Destructor
     ~IXFileHandle();
@@ -115,6 +120,24 @@ struct LeafEntry
 	}
 };
 
+class Node 
+{
+public:
+	Node();
+	~Node();
+
+	bool isOverflow();
+	bool isUnderflow();
+
+public:
+	MarkType nodeType;
+	OffsetType nodeSize;
+	Node* parentPointer;
+	bool isDirty;
+	PageNum pageNum;
+	bool isLoaded;
+};
+
 struct InternalEntry
 {
 	void* key;
@@ -136,23 +159,7 @@ struct InternalEntry
 	}
 };
 
-class Node 
-{
-public:
-	Node();
-	~Node();
 
-	bool isOverflow();
-	bool isUnderflow();
-
-public:
-	MarkType nodeType;
-	OffsetType nodeSize;
-	Node* parentPointer;
-	bool isDirty;
-	PageNum pageNum;
-	bool isLoaded;
-};
 
 class InternalNode: public Node 
 {

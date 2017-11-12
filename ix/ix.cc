@@ -21,22 +21,22 @@ IndexManager::~IndexManager()
 
 RC IndexManager::createFile(const string &fileName)
 {
-    return -1;
+    return PagedFileManager::instance()->createFile(fileName);
 }
 
 RC IndexManager::destroyFile(const string &fileName)
 {
-    return -1;
+    return PagedFileManager::instance()->destroyFile(fileName);
 }
 
 RC IndexManager::openFile(const string &fileName, IXFileHandle &ixfileHandle)
 {
-    return -1;
+    return PagedFileManager::instance()->openFile(fileName, ixfileHandle.handle);
 }
 
 RC IndexManager::closeFile(IXFileHandle &ixfileHandle)
 {
-    return -1;
+    return PagedFileManager::instance()->closeFile(ixfileHandle.handle);
 }
 
 RC IndexManager::insertEntry(IXFileHandle &ixfileHandle, const Attribute &attribute, const void *key, const RID &rid)
