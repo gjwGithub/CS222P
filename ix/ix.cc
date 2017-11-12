@@ -99,6 +99,53 @@ RC IXFileHandle::collectCounterValues(unsigned &readPageCount, unsigned &writePa
     return -1;
 }
 
+Node::Node()
+{
+	this->isDirty = false;
+	this->isLoaded = false;
+	this->nodeSize = 0;
+	this->nodeType = LeafNodeType;
+	this->pageNum = -1;
+	this->parentPointer = NULL;
+}
+
+Node::~Node()
+{
+	delete this->parentPointer;
+}
+
+LeafNode::LeafNode()
+{
+	this->isDirty = false;
+	this->isLoaded = false;
+	this->nodeSize = 0;
+	this->nodeType = LeafNodeType;
+	this->overflowPointer = NULL;
+	this->pageNum = -1;
+	this->parentPointer = NULL;
+	this->rightPointer = NULL;
+}
+
+LeafNode::~LeafNode()
+{
+	delete this->overflowPointer;
+	delete this->parentPointer;
+	delete this->rightPointer;
+}
+
+BTree::BTree()
+{
+	this->root = NULL;
+	this->smallestLeaf = NULL;
+	this->attrType = AttrType::TypeInt;
+}
+
+BTree::~BTree()
+{
+	delete this->root;
+	delete this->smallestLeaf;
+}
+
 char* BTree::generatePage(const Node* node)
 {
 	char* pageData = (char*)calloc(PAGE_SIZE, 1);
@@ -191,3 +238,21 @@ char* BTree::generatePage(const Node* node)
 	}
 	return pageData;
 }
+
+Node* BTree::generateNode(const char* data)
+{
+	Node* result = NULL;
+	MarkType nodeType;
+	OffsetType offset = 0;
+	memcpy(&nodeType, data + offset, sizeof(MarkType));
+	offset += sizeof(MarkType);
+	if (nodeType == InternalNodeType)
+	{
+		result = new InternalNode();
+		OffsetType nodeSize;
+		memcpy(&nodeSize, data + offset, sizeof(OffsetType));
+		offset += sizeof(OffsetType);
+
+	}
+}
+

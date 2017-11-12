@@ -101,6 +101,18 @@ struct LeafEntry
 {
 	void* key;
 	RID rid;
+
+	LeafEntry()
+	{
+		this->key = NULL;
+		rid.pageNum = -1;
+		rid.slotNum = -1;
+	}
+
+	~LeafEntry()
+	{
+		delete this->key;
+	}
 };
 
 struct InternalEntry
@@ -108,13 +120,31 @@ struct InternalEntry
 	void* key;
 	Node* leftChild;
 	Node* rightChild;
+
+	InternalEntry()
+	{
+		this->key = NULL;
+		this->leftChild = NULL;
+		this->rightChild = NULL;
+	}
+
+	~InternalEntry()
+	{
+		delete this->key;
+		delete this->leftChild;
+		delete this->rightChild;
+	}
 };
 
 class Node 
 {
 public:
+	Node();
+	~Node();
+
 	bool isOverflow();
 	bool isUnderflow();
+
 public:
 	MarkType nodeType;
 	OffsetType nodeSize;
@@ -133,6 +163,10 @@ public:
 class LeafNode: public Node 
 {
 public:
+	LeafNode();
+	~LeafNode();
+
+public:
 	Node* rightPointer;
 	Node* overflowPointer;
 	vector<LeafEntry> leafEntries;
@@ -141,6 +175,9 @@ public:
 class BTree 
 {
 public:
+	BTree();
+	~BTree();
+
 	void insertEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
 	void deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
 	LeafNode* searchEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
