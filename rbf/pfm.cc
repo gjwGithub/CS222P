@@ -37,49 +37,7 @@ RC PagedFileManager::createFile(const string &fileName)
 		fclose(file);
 		return -1;
     }
-
-	//Create metadata in page 0
-	unsigned readPageCounter = 0;
-	unsigned writePageCounter = 0;
-	unsigned appendPageCounter = 0;
-	unsigned pageNum = 0;
-	unsigned insertCount = 0;
-	unsigned currentVersion = 0;
-	char* metaData = (char*)calloc(PAGE_SIZE, 1);
-	OffsetType offset = 0;
-	memcpy(metaData + offset, &readPageCounter, sizeof(unsigned));
-	offset += sizeof(unsigned);
-	memcpy(metaData + offset, &writePageCounter, sizeof(unsigned));
-	offset += sizeof(unsigned);
-	memcpy(metaData + offset, &appendPageCounter, sizeof(unsigned));
-	offset += sizeof(unsigned);
-	memcpy(metaData + offset, &pageNum, sizeof(unsigned));
-	offset += sizeof(unsigned);
-	memcpy(metaData + offset, &insertCount, sizeof(unsigned));
-	offset += sizeof(unsigned);
-	memcpy(metaData + offset, &currentVersion, sizeof(unsigned));
-	offset += sizeof(unsigned);
-	size_t writeSize = fwrite(metaData, 1, PAGE_SIZE, file);
-	if (writeSize != PAGE_SIZE)
-	{
-#ifdef DEBUG
-		cerr << "Only write " << writeSize << " bytes, less than PAGE_SIZE " << PAGE_SIZE << " bytes in creating metadata " << pageNum << endl;
-#endif
-		free(metaData);
-		return -1;
-	}
-	int status = fflush(file);
-	if (status)
-	{
-#ifdef DEBUG
-		cerr << "Cannot flush the file while creating metadata" << endl;
-#endif
-		free(metaData);
-		return -1;
-	}
-	free(metaData);
-
-	status = fclose(file);
+	int status = fclose(file);
 	if (status)
 	{
 #ifdef DEBUG
@@ -130,17 +88,6 @@ RC PagedFileManager::destroyFile(const string &fileName)
 
 RC PagedFileManager::openFile(const string &fileName, FileHandle &fileHandle)
 {
-	if (fileHandle.getFile())
-	{
-		int status = closeFile(fileHandle);
-		if (status)
-		{
-#ifdef DEBUG
-			cerr << "Cannot close the file before opening the file" << endl;
-#endif
-			return -1;
-		}
-	}
     FILE *file;
 	file = fopen(fileName.c_str(), "rb+");
 	if (file == NULL)
@@ -154,22 +101,6 @@ RC PagedFileManager::openFile(const string &fileName, FileHandle &fileHandle)
 	{ 
 		fileHandle.setFile(file);
     }
-	RC status = fileHandle.readMetaData();
-	if (status == -1)
-	{
-#ifdef DEBUG
-		cerr << "Read meta data error in open file" << endl;
-#endif
-		return -1;
-	}
-	status = fileHandle.generateAllPagesSize(fileHandle.allPagesSize);
-	if (status == -1)
-	{
-#ifdef DEBUG
-		cerr << "Generate all page sizes error in open file" << endl;
-#endif
-		return -1;
-	}
 	fileHandle.currentFileName = fileName;
     return 0;
 }
@@ -258,14 +189,6 @@ RC FileHandle::readPage(PageNum pageNum, void *data)
 		return -1;
 	}
     ++(this->readPageCounter);
-	status = writeMetaData();
-	if (status == -1)
-	{
-#ifdef DEBUG
-		cerr << "Write meta data error in reading page" << endl;
-#endif
-		return -1;
-	}
 	return 0;
 }
 
@@ -312,14 +235,6 @@ RC FileHandle::writePage(PageNum pageNum, const void *data)
 		return -1;
 	}
     ++writePageCounter;
-	status = writeMetaData();
-	if (status == -1)
-	{
-#ifdef DEBUG
-		cerr << "Write meta data error in writing page" << endl;
-#endif
-		return -1;
-	}
 	return 0;
 }
 
@@ -351,14 +266,6 @@ RC FileHandle::appendPage(const void *data)
 	}
 	++appendPageCounter;
 	++(this->pageCount);
-	status = writeMetaData();
-	if (status == -1)
-	{
-#ifdef DEBUG
-		cerr << "Write meta data error in appending page" << endl;
-#endif
-		return -1;
-	}
     return 0;
 }
 

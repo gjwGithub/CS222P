@@ -9,6 +9,7 @@
 # define IX_EOF (-1)  // end of the index scan
 
 #define NULLNODE -1
+#define UnknownNodeType 0
 #define InternalNodeType 1
 #define LeafNodeType 2
 
@@ -143,6 +144,7 @@ public:
 	void insertEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
 	void deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
 	LeafNode* searchEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
+	void traverse();
 	char* generatePage(const Node* node);
 	Node* generateNode(const char* data);
 public:

@@ -19,7 +19,72 @@ RecordBasedFileManager::~RecordBasedFileManager()
 }
 
 RC RecordBasedFileManager::createFile(const string &fileName) {
-    return PagedFileManager::instance()->createFile(fileName);
+	RC status = PagedFileManager::instance()->createFile(fileName);
+	if (status)
+	{
+#ifdef DEBUG
+		cerr << "Cannot create the file while creating file" << endl;
+#endif
+		return -1;
+	}
+
+	//Create metadata in page 0
+	FILE *file = fopen(fileName.c_str(), "w");
+	if (file == NULL)
+	{
+#ifdef DEBUG
+		cerr << "File does not exist!" << endl;
+#endif
+		return -1;
+	}
+	unsigned readPageCounter = 0;
+	unsigned writePageCounter = 0;
+	unsigned appendPageCounter = 0;
+	unsigned pageNum = 0;
+	unsigned insertCount = 0;
+	unsigned currentVersion = 0;
+	char* metaData = (char*)calloc(PAGE_SIZE, 1);
+	OffsetType offset = 0;
+	memcpy(metaData + offset, &readPageCounter, sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(metaData + offset, &writePageCounter, sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(metaData + offset, &appendPageCounter, sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(metaData + offset, &pageNum, sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(metaData + offset, &insertCount, sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(metaData + offset, &currentVersion, sizeof(unsigned));
+	offset += sizeof(unsigned);
+	size_t writeSize = fwrite(metaData, 1, PAGE_SIZE, file);
+	if (writeSize != PAGE_SIZE)
+	{
+#ifdef DEBUG
+		cerr << "Only write " << writeSize << " bytes, less than PAGE_SIZE " << PAGE_SIZE << " bytes in creating metadata" << endl;
+#endif
+		free(metaData);
+		return -1;
+	}
+	status = fflush(file);
+	if (status)
+	{
+#ifdef DEBUG
+		cerr << "Cannot flush the file while creating metadata" << endl;
+#endif
+		free(metaData);
+		return -1;
+	}
+	free(metaData);
+	status = fclose(file);
+	if (status)
+	{
+#ifdef DEBUG
+		cerr << "Cannot close the file while creating the file" << endl;
+#endif
+		return -1;
+	}
+	return 0;
 }
 
 RC RecordBasedFileManager::destroyFile(const string &fileName) {
@@ -27,11 +92,62 @@ RC RecordBasedFileManager::destroyFile(const string &fileName) {
 }
 
 RC RecordBasedFileManager::openFile(const string &fileName, FileHandle &fileHandle) {
-    return PagedFileManager::instance()->openFile(fileName, fileHandle);
+	if (fileHandle.getFile())
+	{
+		int status = closeFile(fileHandle);
+		if (status)
+		{
+#ifdef DEBUG
+			cerr << "Cannot close the file before opening the file" << endl;
+#endif
+			return -1;
+		}
+	}
+	RC status = PagedFileManager::instance()->openFile(fileName, fileHandle);
+	if (status == -1)
+	{
+#ifdef DEBUG
+		cerr << "Open file error in open file" << endl;
+#endif
+		return -1;
+	}
+	status = fileHandle.readMetaData();
+	if (status == -1)
+	{
+#ifdef DEBUG
+		cerr << "Read meta data error in open file" << endl;
+#endif
+		return -1;
+	}
+	status = fileHandle.generateAllPagesSize(fileHandle.allPagesSize);
+	if (status == -1)
+	{
+#ifdef DEBUG
+		cerr << "Generate all page sizes error in open file" << endl;
+#endif
+		return -1;
+	}
+	return 0;
 }
 
 RC RecordBasedFileManager::closeFile(FileHandle &fileHandle) {
-    return PagedFileManager::instance()->closeFile(fileHandle);
+	RC status = fileHandle.writeMetaData();
+	if (status == -1)
+	{
+#ifdef DEBUG
+		cerr << "Write meta data error in closing file" << endl;
+#endif
+		return -1;
+	}
+	status = PagedFileManager::instance()->closeFile(fileHandle);
+	if (status == -1)
+	{
+#ifdef DEBUG
+		cerr << "Write meta data error in closing file" << endl;
+#endif
+		return -1;
+	}
+	return 0;
 }
 
 void RecordBasedFileManager::generateFieldInfo(const vector<Attribute> &recordDescriptor, const void *data, OffsetType &resultLength, char* &result, OffsetType &dataSize)
