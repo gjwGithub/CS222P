@@ -97,6 +97,24 @@ class IXFileHandle {
 
 };
 
+class Node
+{
+public:
+	Node();
+	~Node();
+
+	bool isOverflow();
+	bool isUnderflow();
+
+public:
+	MarkType nodeType;
+	OffsetType nodeSize;
+	Node** parentPointer;
+	bool isDirty;
+	PageNum pageNum;
+	bool isLoaded;
+};
+
 struct LeafEntry
 {
 	void* key;
@@ -118,8 +136,8 @@ struct LeafEntry
 struct InternalEntry
 {
 	void* key;
-	Node* leftChild;
-	Node* rightChild;
+	Node** leftChild;
+	Node** rightChild;
 
 	InternalEntry()
 	{
@@ -131,31 +149,15 @@ struct InternalEntry
 	~InternalEntry()
 	{
 		delete this->key;
-		delete this->leftChild;
-		delete this->rightChild;
 	}
-};
-
-class Node 
-{
-public:
-	Node();
-	~Node();
-
-	bool isOverflow();
-	bool isUnderflow();
-
-public:
-	MarkType nodeType;
-	OffsetType nodeSize;
-	Node* parentPointer;
-	bool isDirty;
-	PageNum pageNum;
-	bool isLoaded;
 };
 
 class InternalNode: public Node 
 {
+public:
+	InternalNode();
+	~InternalNode();
+
 public:
 	vector<InternalEntry> internalEntries;
 };
@@ -167,8 +169,8 @@ public:
 	~LeafNode();
 
 public:
-	Node* rightPointer;
-	Node* overflowPointer;
+	Node** rightPointer;
+	LeafNode** overflowPointer;
 	vector<LeafEntry> leafEntries;
 };
 
@@ -183,11 +185,12 @@ public:
 	LeafNode* searchEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
 	void traverse();
 	char* generatePage(const Node* node);
-	Node* generateNode(const char* data);
+	Node** generateNode(const char* data);
 public:
-	Node* root;
-	Node* smallestLeaf;
+	Node** root;
+	Node** smallestLeaf;
 	AttrType attrType;
+	unordered_map<PageNum, Node**> nodeMap;
 };
 
 #endif

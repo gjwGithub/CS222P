@@ -111,7 +111,20 @@ Node::Node()
 
 Node::~Node()
 {
-	delete this->parentPointer;
+}
+
+InternalNode::InternalNode()
+{
+	this->isDirty = false;
+	this->isLoaded = false;
+	this->nodeSize = 0;
+	this->nodeType = InternalNodeType;
+	this->pageNum = -1;
+	this->parentPointer = NULL;
+}
+
+InternalNode::~InternalNode()
+{
 }
 
 LeafNode::LeafNode()
@@ -129,8 +142,6 @@ LeafNode::LeafNode()
 LeafNode::~LeafNode()
 {
 	delete this->overflowPointer;
-	delete this->parentPointer;
-	delete this->rightPointer;
 }
 
 BTree::BTree()
@@ -142,8 +153,11 @@ BTree::BTree()
 
 BTree::~BTree()
 {
-	delete this->root;
-	delete this->smallestLeaf;
+	for (auto &item : this->nodeMap)
+	{
+		delete *item.second;
+		delete item.second;
+	}
 }
 
 char* BTree::generatePage(const Node* node)
@@ -154,9 +168,9 @@ char* BTree::generatePage(const Node* node)
 	offset += sizeof(MarkType);
 	memcpy(pageData + offset, &node->nodeSize, sizeof(OffsetType));
 	offset += sizeof(OffsetType);
-	if (node->parentPointer)
+	if (node->parentPointer && *node->parentPointer)
 	{
-		PageNum parentPageNum = node->parentPointer->pageNum;
+		PageNum parentPageNum = (*node->parentPointer)->pageNum;
 		memcpy(pageData + offset, &parentPageNum, sizeof(PageNum));
 		offset += sizeof(PageNum);
 	}
@@ -173,7 +187,7 @@ char* BTree::generatePage(const Node* node)
 		for (OffsetType i = 0; i < slotCount; i++)
 		{
 			//If the slot is not the last slot, we only write its left child in page
-			PageNum leftChildPageNum = ((const InternalNode*)node)->internalEntries[i].leftChild->pageNum;
+			PageNum leftChildPageNum = (*((const InternalNode*)node)->internalEntries[i].leftChild)->pageNum;
 			memcpy(pageData + offset, &leftChildPageNum, sizeof(PageNum));
 			offset += sizeof(PageNum);
 			//Store slot offsets in slot table
@@ -198,7 +212,7 @@ char* BTree::generatePage(const Node* node)
 			//If the slot is the last slot, we will also write its right child in page
 			if (i == slotCount - 1)
 			{
-				PageNum rightChildPageNum = ((const InternalNode*)node)->internalEntries[i].rightChild->pageNum;
+				PageNum rightChildPageNum = (*((const InternalNode*)node)->internalEntries[i].rightChild)->pageNum;
 				memcpy(pageData + offset, &rightChildPageNum, sizeof(PageNum));
 				offset += sizeof(PageNum);
 			}
@@ -206,6 +220,10 @@ char* BTree::generatePage(const Node* node)
 	}
 	else if (node->nodeType == LeafNodeType)
 	{
+		memcpy(pageData + offset, &(*((const LeafNode*)node)->rightPointer)->pageNum, sizeof(PageNum));
+		offset += sizeof(PageNum);
+		memcpy(pageData + offset, &(*((const LeafNode*)node)->overflowPointer)->pageNum, sizeof(PageNum));
+		offset += sizeof(PageNum);
 		OffsetType slotCount = (OffsetType)((const LeafNode*)node)->leafEntries.size();
 		memcpy(pageData + PAGE_SIZE - sizeof(OffsetType), &slotCount, sizeof(OffsetType));
 		for (OffsetType i = 0; i < slotCount; i++)
@@ -239,20 +257,157 @@ char* BTree::generatePage(const Node* node)
 	return pageData;
 }
 
-Node* BTree::generateNode(const char* data)
+Node** BTree::generateNode(const char* data)
 {
-	Node* result = NULL;
+	Node** result = new Node*;
 	MarkType nodeType;
 	OffsetType offset = 0;
 	memcpy(&nodeType, data + offset, sizeof(MarkType));
 	offset += sizeof(MarkType);
 	if (nodeType == InternalNodeType)
 	{
-		result = new InternalNode();
+		*result = new InternalNode();
+		(*result)->isLoaded = true;
+
 		OffsetType nodeSize;
 		memcpy(&nodeSize, data + offset, sizeof(OffsetType));
 		offset += sizeof(OffsetType);
+		(*result)->nodeSize = nodeSize;
 
+		PageNum parent;
+		memcpy(&parent, data + offset, sizeof(PageNum));
+		offset += sizeof(PageNum);
+		if (parent != NULLNODE)
+			(*result)->parentPointer = this->nodeMap[parent];
+
+		OffsetType slotCount;
+		memcpy(&slotCount, data + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
+		for (OffsetType i = 0; i < slotCount; i++)
+		{
+			OffsetType slotOffset;
+			memcpy(&slotOffset, data + PAGE_SIZE - sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
+			InternalEntry entry;
+			OffsetType keyLength = 0;
+			if (this->attrType = AttrType::TypeInt)
+			{
+				entry.key = malloc(sizeof(int));
+				memcpy(entry.key, data + slotOffset, sizeof(int));
+				keyLength = sizeof(int);
+			}
+			else if (this->attrType = AttrType::TypeReal)
+			{
+				entry.key = malloc(sizeof(float));
+				memcpy(entry.key, data + slotOffset, sizeof(float));
+				keyLength = sizeof(float);
+			}
+			else if (this->attrType = AttrType::TypeVarChar)
+			{
+				int strLength = *(int*)(data + slotOffset);
+				memcpy(entry.key, data + slotOffset, sizeof(int) + strLength);
+				keyLength = sizeof(int) + strLength;
+			}
+
+			//Generate left child pointer
+			OffsetType leftChildPointerOffset = slotOffset - sizeof(PageNum);
+			PageNum leftChildPageNum = *(PageNum*)(data + leftChildPointerOffset);
+			auto search = this->nodeMap.find(leftChildPageNum);
+			if (search != this->nodeMap.end())
+			{
+				entry.leftChild = this->nodeMap[leftChildPageNum];
+			}
+			else 
+			{
+				Node** newNodePointer = new Node*;
+				*newNodePointer = new Node();
+				entry.leftChild = newNodePointer;
+				(*entry.leftChild)->pageNum = leftChildPageNum;
+				this->nodeMap[leftChildPageNum] = entry.leftChild;
+			}
+
+			//Generate right child pointer
+			OffsetType rightChildPointerOffset = slotOffset + keyLength;
+			PageNum rightChildPageNum = *(PageNum*)(data + rightChildPointerOffset);
+			auto search = this->nodeMap.find(rightChildPageNum);
+			if (search != this->nodeMap.end())
+			{
+				entry.rightChild = this->nodeMap[rightChildPageNum];
+			}
+			else
+			{
+				Node** newNodePointer = new Node*;
+				*newNodePointer = new Node();
+				entry.rightChild = newNodePointer;
+				(*entry.rightChild)->pageNum = rightChildPageNum;
+				this->nodeMap[rightChildPageNum] = entry.rightChild;
+			}
+
+			(*(InternalNode**)result)->internalEntries.push_back(entry);
+		}
 	}
+	else if (nodeType == LeafNodeType)
+	{
+		*result = new LeafNode();
+		(*result)->isLoaded = true;
+
+		OffsetType nodeSize;
+		memcpy(&nodeSize, data + offset, sizeof(OffsetType));
+		offset += sizeof(OffsetType);
+		(*result)->nodeSize = nodeSize;
+
+		PageNum parent;
+		memcpy(&parent, data + offset, sizeof(PageNum));
+		offset += sizeof(PageNum);
+		if (parent != NULLNODE)
+			(*result)->parentPointer = this->nodeMap[parent];
+
+		PageNum rightPageNum;
+		memcpy(&rightPageNum, data + offset, sizeof(PageNum));
+		offset += sizeof(PageNum);
+		if (rightPageNum != NULLNODE)
+			(*(LeafNode**)result)->rightPointer = this->nodeMap[rightPageNum];
+		else
+			(*(LeafNode**)result)->rightPointer = NULL;
+
+		PageNum overflowPageNum;
+		memcpy(&overflowPageNum, data + offset, sizeof(PageNum));
+		offset += sizeof(PageNum);
+		if (rightPageNum != NULLNODE)
+			(*(LeafNode**)result)->overflowPointer = (LeafNode**)this->nodeMap[overflowPageNum];
+		else
+			(*(LeafNode**)result)->overflowPointer = NULL;
+
+		OffsetType slotCount;
+		memcpy(&slotCount, data + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
+		for (OffsetType i = 0; i < slotCount; i++)
+		{
+			OffsetType slotOffset;
+			memcpy(&slotOffset, data + PAGE_SIZE - sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
+			LeafEntry entry;
+			OffsetType keyLength = 0;
+			if (this->attrType = AttrType::TypeInt)
+			{
+				entry.key = malloc(sizeof(int));
+				memcpy(entry.key, data + slotOffset, sizeof(int));
+				keyLength = sizeof(int);
+			}
+			else if (this->attrType = AttrType::TypeReal)
+			{
+				entry.key = malloc(sizeof(float));
+				memcpy(entry.key, data + slotOffset, sizeof(float));
+				keyLength = sizeof(float);
+			}
+			else if (this->attrType = AttrType::TypeVarChar)
+			{
+				int strLength = *(int*)(data + slotOffset);
+				memcpy(entry.key, data + slotOffset, sizeof(int) + strLength);
+				keyLength = sizeof(int) + strLength;
+			}
+			memcpy(&entry.rid.pageNum, data + slotOffset + keyLength, sizeof(PageNum));
+			memcpy(&entry.rid.slotNum, data + slotOffset + keyLength + sizeof(PageNum), sizeof(unsigned));
+
+			(*(LeafNode**)result)->leafEntries.push_back(entry);
+		}
+	}
+	return result;
 }
 
