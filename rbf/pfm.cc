@@ -88,6 +88,13 @@ RC PagedFileManager::destroyFile(const string &fileName)
 
 RC PagedFileManager::openFile(const string &fileName, FileHandle &fileHandle)
 {
+	if (fileHandle.getFile())
+	{
+#ifdef DEBUG
+		cerr << "FileHandle is already a handle for some open file!" << endl;
+#endif
+		return -1;
+	}
     FILE *file;
 	file = fopen(fileName.c_str(), "rb+");
 	if (file == NULL)
