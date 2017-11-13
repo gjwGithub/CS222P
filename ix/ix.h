@@ -175,15 +175,14 @@ struct InternalEntry
 	}
 };
 
-<<<<<<< HEAD
 
-=======
+
+
 class InternalNode: public Node 
 {
 public:
 	InternalNode();
 	~InternalNode();
->>>>>>> 3a93501789bd2a60b2da7299e3d3d40426bb5a0d
 
 public:
 	vector<InternalEntry> internalEntries;

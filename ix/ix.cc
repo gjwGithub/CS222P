@@ -171,25 +171,26 @@ BTree::~BTree()
 void BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry pair){
 	if(root==NULL){
 		//set node fields
-		Node new_node=new LeafNode();   
-		new_node.leafEntries.push_back(pair);
-		new_node.nodeType=LeafNodeType;
+		Node** new_node=new LeafNode*;   
+		*new_node=new LeafNode();
+		(*new_node)->leafEntries.push_back(pair);
+		(*new_node)->nodeType=LeafNodeType;
 		int entry_length;
 		if(attrType==TypeVarChar){
-			void * key1=pair.key;
+			void* key1=pair.key;
 			int var_length;
 			memcpy(&var_length,(char *)pair.key,4);
 			entry_length=4+var_length+8;
 		}else{
 			entry_length=12;
 		}
-		new_node.nodeSize=nodeSize+entry_length;
+		(*new_node)->nodeSize=nodeSize+entry_length;
 		//set tree fields
-		root=*new_node;
-		smallestLeaf=*new_node;
-		void* new_page=malloc(PAGE_SIZE);
-		new_page=generatePage(new_node);
+		root=new_node;
+		smallestLeaf=new_node;
+		void* new_page=generatePage(new_node);
 		ixfileHandle.appendPage(new_page);
+		nodeMap.insert(pair<PageNum, Node**>(ixAppendPageCounter,new_node);
 	}else{
 
 	}
