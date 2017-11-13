@@ -41,7 +41,9 @@ RC IndexManager::closeFile(IXFileHandle &ixfileHandle)
 
 RC IndexManager::insertEntry(IXFileHandle &ixfileHandle, const Attribute &attribute, const void *key, const RID &rid)
 {
-    LeafEntry leafEntry={key,rid};
+	LeafEntry leafEntry;
+	leafEntry.key = &key;
+	leafEntry.rid = rid;
     if(tree==NULL){
     	tree=new BTree();
     	tree->attrType=attribute.type;
@@ -108,6 +110,27 @@ RC IXFileHandle::collectCounterValues(unsigned &readPageCount, unsigned &writePa
     return -1;
 }
 
+LeafEntry::LeafEntry(const Attribute &attribute, void* key, RID rid)
+{
+	if (attribute.type == AttrType::TypeInt)
+	{
+		this->key = malloc(sizeof(int));
+		memcpy(this->key, key, sizeof(int));
+	}
+	else if (attribute.type == AttrType::TypeReal)
+	{
+		this->key = malloc(sizeof(float));
+		memcpy(this->key, key, sizeof(float));
+	}
+	else if (attribute.type == AttrType::TypeVarChar)
+	{
+		int strLength = *(int*)key;
+		this->key = malloc(sizeof(int) + strLength);
+		memcpy(this->key, key, sizeof(int) + strLength);
+	}
+	this->rid = rid;
+}
+
 Node::Node()
 {
 	this->isDirty = false;
@@ -122,11 +145,21 @@ Node::~Node()
 {
 }
 
+bool Node::isOverflow()
+{
+	return this->nodeSize > PAGE_SIZE;
+}
+
+bool Node::isUnderflow()
+{
+	return this->nodeSize < PAGE_SIZE / 2;
+}
+
 InternalNode::InternalNode()
 {
 	this->isDirty = false;
 	this->isLoaded = false;
-	this->nodeSize = 0;
+	this->nodeSize = sizeof(MarkType) + sizeof(OffsetType) + sizeof(PageNum) + sizeof(OffsetType);
 	this->nodeType = InternalNodeType;
 	this->pageNum = -1;
 	this->parentPointer = NULL;
@@ -140,7 +173,7 @@ LeafNode::LeafNode()
 {
 	this->isDirty = false;
 	this->isLoaded = false;
-	this->nodeSize = 0;
+	this->nodeSize = sizeof(MarkType) + sizeof(OffsetType) + sizeof(PageNum) * 3 + sizeof(OffsetType);
 	this->nodeType = LeafNodeType;
 	this->overflowPointer = NULL;
 	this->pageNum = -1;
@@ -150,7 +183,6 @@ LeafNode::LeafNode()
 
 LeafNode::~LeafNode()
 {
-	delete this->overflowPointer;
 }
 
 BTree::BTree()
@@ -168,29 +200,32 @@ BTree::~BTree()
 		delete item.second;
 	}
 }
-void BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry pair){
-	if(root==NULL){
+
+RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry pair) {
+	if (root == NULL) {
 		//set node fields
-		Node new_node=new LeafNode();   
-		new_node.leafEntries.push_back(pair);
-		new_node.nodeType=LeafNodeType;
+		Node** new_node = new Node*;
+		*new_node = new LeafNode();
+		((LeafNode*)*new_node)->leafEntries.push_back(pair);
+		((LeafNode*)*new_node)->nodeType = LeafNodeType;
 		int entry_length;
-		if(attrType==TypeVarChar){
-			void * key1=pair.key;
+		if (attrType == TypeVarChar) {
+			void * key1 = pair.key;
 			int var_length;
-			memcpy(&var_length,(char *)pair.key,4);
-			entry_length=4+var_length+8;
-		}else{
-			entry_length=12;
+			memcpy(&var_length, (char *)pair.key, 4);
+			entry_length = 4 + var_length + 8;
 		}
-		new_node.nodeSize=nodeSize+entry_length;
+		else {
+			entry_length = 12;
+		}
+		((LeafNode*)*new_node)->nodeSize += entry_length;
 		//set tree fields
-		root=*new_node;
-		smallestLeaf=*new_node;
-		void* new_page=malloc(PAGE_SIZE);
-		new_page=generatePage(new_node);
+		root = new_node;
+		smallestLeaf = new_node;
+		void* new_page = generatePage(*new_node);
 		ixfileHandle.appendPage(new_page);
-	}else{
+	}
+	else {
 
 	}
 

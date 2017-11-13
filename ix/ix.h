@@ -132,6 +132,8 @@ struct LeafEntry
 		rid.slotNum = -1;
 	}
 
+	LeafEntry(const Attribute &attribute, void* key, RID rid);
+
 	~LeafEntry()
 	{
 		delete this->key;
@@ -150,7 +152,7 @@ public:
 public:
 	MarkType nodeType;
 	OffsetType nodeSize;
-	Node* parentPointer;
+	Node** parentPointer;
 	bool isDirty;
 	PageNum pageNum;
 	bool isLoaded;
@@ -175,15 +177,11 @@ struct InternalEntry
 	}
 };
 
-<<<<<<< HEAD
-
-=======
 class InternalNode: public Node 
 {
 public:
 	InternalNode();
 	~InternalNode();
->>>>>>> 3a93501789bd2a60b2da7299e3d3d40426bb5a0d
 
 public:
 	vector<InternalEntry> internalEntries;
@@ -207,10 +205,9 @@ public:
 	BTree();
 	~BTree();
 
-	void insertEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
-	void deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
+	RC insertEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
+	RC deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
 	LeafNode* searchEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
-	void traverse();
 	char* generatePage(const Node* node);
 	Node** generateNode(const char* data);
 public:
