@@ -132,7 +132,7 @@ struct LeafEntry
 		rid.slotNum = -1;
 	}
 
-	LeafEntry(const Attribute &attribute, void* key, RID rid);
+	LeafEntry(const Attribute &attribute, const void* key, const RID rid);
 
 	~LeafEntry()
 	{
@@ -205,11 +205,16 @@ public:
 	BTree();
 	~BTree();
 
-	RC insertEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
-	RC deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
-	LeafNode* searchEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
-	char* generatePage(const Node* node);
+	RC insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair);
+	RC deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair);
+	LeafNode* searchEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair);
+	char* generatePage(const Node** node);
 	Node** generateNode(const char* data);
+	RC findRecord(IXFileHandle &ixfileHandle, Node** root, const LeafEntry &pair, LeafEntry* &result);
+	RC findLeaf(IXFileHandle &ixfileHandle, Node** root, const LeafEntry &pair, LeafNode** &result);
+	int compareKey(void* v1, void* v2);
+	int compareEntry(const LeafEntry &pair1, const LeafEntry &pair2);
+	RC loadNode(IXFileHandle &ixfileHandle, Node** &target);
 public:
 	Node** root;
 	Node** smallestLeaf;
