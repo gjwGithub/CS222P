@@ -86,6 +86,8 @@ class IXFileHandle {
     unsigned ixReadPageCounter;
     unsigned ixWritePageCounter;
     unsigned ixAppendPageCounter;
+    int root;
+    int smallestLeaf;
     FileHandle handle;
     // Constructor
     IXFileHandle();
@@ -93,7 +95,8 @@ class IXFileHandle {
     RC readPage(PageNum pageNum, void *data);                             // Get a specific page
     RC writePage(PageNum pageNum, const void *data);                      // Write a specific page
     RC appendPage(const void *data);                                      // Append a specific page
-
+    RC readMetaPage();
+    RC writeMetaPage();
     // Destructor
     ~IXFileHandle();
 
@@ -132,6 +135,8 @@ struct LeafEntry
 		rid.slotNum = -1;
 	}
 
+	LeafEntry(const Attribute &attribute, void* key, RID rid);
+
 	~LeafEntry()
 	{
 		delete this->key;
@@ -150,7 +155,7 @@ public:
 public:
 	MarkType nodeType;
 	OffsetType nodeSize;
-	Node* parentPointer;
+	Node** parentPointer;
 	bool isDirty;
 	PageNum pageNum;
 	bool isLoaded;
@@ -174,9 +179,6 @@ struct InternalEntry
 		delete this->key;
 	}
 };
-
-
-
 
 class InternalNode: public Node 
 {
@@ -206,10 +208,9 @@ public:
 	BTree();
 	~BTree();
 
-	void insertEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
-	void deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
+	RC insertEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
+	RC deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
 	LeafNode* searchEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
-	void traverse();
 	char* generatePage(const Node* node);
 	Node** generateNode(const char* data);
 public:

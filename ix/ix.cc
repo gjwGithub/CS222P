@@ -21,9 +21,157 @@ IndexManager::~IndexManager()
 
 RC IndexManager::createFile(const string &fileName)
 {
-    return PagedFileManager::instance()->createFile(fileName);
-}
+    RC rel=PagedFileManager::instance()->createFile(fileName);
+    if (status)
+	{
+#ifdef DEBUG
+		cerr << "Cannot create the file while creating file" << endl;
+#endif
+		return -1;
+	}
+	FILE *file = fopen(fileName.c_str(), "w");
+	if (file == NULL)
+	{
+#ifdef DEBUG
+		cerr << "File does not exist!" << endl;
+#endif
+		return -1;
+	}
+	unsigned ixReadPageCounter=0;
+    unsigned ixWritePageCounter=0;
+    unsigned ixAppendPageCounter=0;
+    int root=-1;
+    int smallestLeaf=-1;
+    char* metaData = (char*)calloc(PAGE_SIZE, 1);
+    OffsetType offset = 0;
+    memcpy(metaData+offset,&ixReadPageCounter,sizeof(unsigned));
+    offset+=sizeof(unsigned);
+    memcpy(metaData+offset,&ixWritePageCounter,sizeof(unsigned));
+    offset+=sizeof(unsigned);
+    memcpy(metaData+offset,&ixAppendPageCounter,sizeof(unsigned));
+    offset+=sizeof(unsigned);
+    memcpy(metaData+offset,&root,sizeof(int));
+    offset+=sizeof(int);
+    memcpy(metaData+offset,&smallestLeaf,sizeof(int));
+    offset+=sizeof(int);
+    size_t writeSize=fwrite(metaData,1,PAGE_SIZE,file);
+    if (writeSize != PAGE_SIZE)
+	{
+#ifdef DEBUG
+		cerr << "Only write " << writeSize << " bytes, less than PAGE_SIZE " << PAGE_SIZE << " bytes in creating metadata" << endl;
+#endif
+		free(metaData);
+		return -1;
+	}
+	status = fflush(file);
+	if (status)
+	{
+#ifdef DEBUG
+		cerr << "Cannot flush the file while creating metadata" << endl;
+#endif
+		free(metaData);
+		return -1;
+	}
+	free(metaData);
+	status = fclose(file);
+	if (status)
+	{
+#ifdef DEBUG
+		cerr << "Cannot close the file while creating the file" << endl;
+#endif
+		return -1;
+	}
+	return 0;
 
+}
+RC IndexManager::readMetaPage(){
+	if(!handle.file){
+#ifdef DEBUG
+		cerr << "File was not open while reading meta data" << endl;
+#endif
+		return -1;
+	}
+	int status = fseek(handle.file, 0, SEEK_SET);
+	if (status)
+	{
+#ifdef DEBUG
+		cerr << "fseek error in reading meta data " << endl;
+#endif
+		return -1;
+	}
+	char* data = (char*)malloc(PAGE_SIZE);
+	size_t readSize = fread(data, 1, PAGE_SIZE, handle.file);
+	if (readSize != PAGE_SIZE)
+	{
+#ifdef DEBUG
+		cerr << "Only read " << readSize << " bytes, less than PAGE_SIZE " << PAGE_SIZE << " bytes in reading meta data " << endl;
+#endif
+		free(data);
+		return -1;
+	}
+
+	OffsetType offset = 0;
+	memcpy(&(this->ixReadPageCounter), data + offset, sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(&(this->ixWritePageCounter), data + offset, sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(&(this->ixAppendPageCounter), data + offset, sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(&(this->root), data + offset, sizeof(int));
+	offset += sizeof(int);
+	memcpy(&(this->smallestLeaf), data + offset, sizeof(int));
+	offset += sizeof(int);
+	free(data);
+	return 0;
+}
+RC IndexManager::writeMetaPage(){
+	if(!handle.file){
+#ifdef DEBUG
+		cerr << "File was not open while reading meta data" << endl;
+#endif
+		return -1;
+	}
+	int status = fseek(handle.file, 0, SEEK_SET);
+	if (status)
+	{
+#ifdef DEBUG
+		cerr << "fseek error in reading meta data " << endl;
+#endif
+		return -1;
+	}
+	char* data = (char*)calloc(PAGE_SIZE,1);
+	OffsetType offset = 0;
+	memcpy(data + offset, &(this->ixReadPageCounter), sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(data + offset, &(this->ixWritePageCounter), sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(data + offset, &(this->ixAppendPageCounter), sizeof(unsigned));
+	offset += sizeof(unsigned);
+	memcpy(data + offset, &(this->root), sizeof(int));
+	offset += sizeof(int);
+	memcpy(data + offset, &(this->smallestLeaf), sizeof(int));
+	offset += sizeof(int);
+	size_t writeSize = fwrite(data, 1, PAGE_SIZE, handle.file);
+	if (writeSize != PAGE_SIZE)
+	{
+#ifdef DEBUG
+		cerr << "Only write " << writeSize << " bytes, less than PAGE_SIZE " << PAGE_SIZE << " bytes in writing meta data " << endl;
+#endif
+		free(data);
+		return -1;
+	}
+	status = fflush(handle.file);
+	if (status)
+	{
+#ifdef DEBUG
+		cerr << "Cannot flush the file in writing meta data " << endl;
+#endif
+		free(data);
+		return -1;
+	}
+	free(data);
+	return 0;
+}
 RC IndexManager::destroyFile(const string &fileName)
 {
     return PagedFileManager::instance()->destroyFile(fileName);
@@ -41,7 +189,9 @@ RC IndexManager::closeFile(IXFileHandle &ixfileHandle)
 
 RC IndexManager::insertEntry(IXFileHandle &ixfileHandle, const Attribute &attribute, const void *key, const RID &rid)
 {
-    LeafEntry leafEntry={key,rid};
+	LeafEntry leafEntry;
+	leafEntry.key = &key;
+	leafEntry.rid = rid;
     if(tree==NULL){
     	tree=new BTree();
     	tree->attrType=attribute.type;
@@ -58,6 +208,23 @@ RC IndexManager::deleteEntry(IXFileHandle &ixfileHandle, const Attribute &attrib
     return -1;
 }
 
+RC IndexManage::readPage(PageNum pageNum, void *data){
+	ixReadPageCounter++;
+	RC rel=handle.readPage(pageNum,data);
+	return rel;
+}
+
+RC IndexManage::writePage(PageNum pageNum, const void *data){
+	ixWritePageCounter++;
+	RC rel=handle.writePage(pageNum,data);
+	return rel;
+}
+
+RC IndexManage::appendPage(const void *data){
+	ixAppendPageCounter++;
+	RC rel=handle.appendPage(pageNum,data);
+	return rel;
+}
 
 RC IndexManager::scan(IXFileHandle &ixfileHandle,
         const Attribute &attribute,
@@ -99,6 +266,7 @@ IXFileHandle::IXFileHandle()
     ixAppendPageCounter = 0;
 }
 
+
 IXFileHandle::~IXFileHandle()
 {
 }
@@ -106,6 +274,27 @@ IXFileHandle::~IXFileHandle()
 RC IXFileHandle::collectCounterValues(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount)
 {
     return -1;
+}
+
+LeafEntry::LeafEntry(const Attribute &attribute, void* key, RID rid)
+{
+	if (attribute.type == AttrType::TypeInt)
+	{
+		this->key = malloc(sizeof(int));
+		memcpy(this->key, key, sizeof(int));
+	}
+	else if (attribute.type == AttrType::TypeReal)
+	{
+		this->key = malloc(sizeof(float));
+		memcpy(this->key, key, sizeof(float));
+	}
+	else if (attribute.type == AttrType::TypeVarChar)
+	{
+		int strLength = *(int*)key;
+		this->key = malloc(sizeof(int) + strLength);
+		memcpy(this->key, key, sizeof(int) + strLength);
+	}
+	this->rid = rid;
 }
 
 Node::Node()
@@ -122,11 +311,21 @@ Node::~Node()
 {
 }
 
+bool Node::isOverflow()
+{
+	return this->nodeSize > PAGE_SIZE;
+}
+
+bool Node::isUnderflow()
+{
+	return this->nodeSize < PAGE_SIZE / 2;
+}
+
 InternalNode::InternalNode()
 {
 	this->isDirty = false;
 	this->isLoaded = false;
-	this->nodeSize = 0;
+	this->nodeSize = sizeof(MarkType) + sizeof(OffsetType) + sizeof(PageNum) + sizeof(OffsetType);
 	this->nodeType = InternalNodeType;
 	this->pageNum = -1;
 	this->parentPointer = NULL;
@@ -140,7 +339,7 @@ LeafNode::LeafNode()
 {
 	this->isDirty = false;
 	this->isLoaded = false;
-	this->nodeSize = 0;
+	this->nodeSize = sizeof(MarkType) + sizeof(OffsetType) + sizeof(PageNum) * 3 + sizeof(OffsetType);
 	this->nodeType = LeafNodeType;
 	this->overflowPointer = NULL;
 	this->pageNum = -1;
@@ -150,7 +349,6 @@ LeafNode::LeafNode()
 
 LeafNode::~LeafNode()
 {
-	delete this->overflowPointer;
 }
 
 BTree::BTree()
@@ -168,32 +366,40 @@ BTree::~BTree()
 		delete item.second;
 	}
 }
-void BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry pair){
-	if(root==NULL){
+
+RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry pair) {
+	if (root == NULL) {
 		//set node fields
-		Node** new_node=new LeafNode*;   
-		*new_node=new LeafNode();
-		(*new_node)->leafEntries.push_back(pair);
-		(*new_node)->nodeType=LeafNodeType;
+
+		Node** new_node = new Node*;
+		*new_node = new LeafNode();
+		((LeafNode*)*new_node)->leafEntries.push_back(pair);
+		((LeafNode*)*new_node)->nodeType = LeafNodeType;
 		int entry_length;
-		if(attrType==TypeVarChar){
-			void* key1=pair.key;
+		if (attrType == TypeVarChar) {
+			void * key1 = pair.key;
 			int var_length;
-			memcpy(&var_length,(char *)pair.key,4);
-			entry_length=4+var_length+8;
-		}else{
-			entry_length=12;
+			memcpy(&var_length, (char *)pair.key, 4);
+			entry_length = 4 + var_length + 8;
 		}
-		(*new_node)->nodeSize=nodeSize+entry_length;
+		else {
+			entry_length = 12;
+		}
+		((LeafNode*)*new_node)->nodeSize += entry_length;
 		//set tree fields
-		root=new_node;
-		smallestLeaf=new_node;
-		void* new_page=generatePage(new_node);
+		root = new_node;
+		smallestLeaf = new_node;
+		void* new_page = generatePage(*new_node);
 		ixfileHandle.appendPage(new_page);
-		nodeMap.insert(pair<PageNum, Node**>(ixAppendPageCounter,new_node);
+		nodeMap.insert(pair<PageNum, Node**>(ixAppendPageCounter,new_node));
+		//set meta fields
+		root=ixAppendPageCounter;
+		smallestLeaf=ixAppendPageCounter;
+		ixfileHandle.writeMetaPage();
 	}else{
 
 	}
+
 
 }
 
