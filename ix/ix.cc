@@ -55,10 +55,10 @@ RC IndexManager::insertEntry(IXFileHandle &ixfileHandle, const Attribute &attrib
 
 RC IndexManager::deleteEntry(IXFileHandle &ixfileHandle, const Attribute &attribute, const void *key, const RID &rid)
 {
-	if (tree) 
+	if (this->tree) 
 	{
 		LeafEntry leafEntry(attribute, key, rid);
-		return tree->deleteEntry(ixfileHandle, leafEntry);
+		return this->tree->deleteEntry(ixfileHandle, leafEntry);
 	}
 #ifdef DEBUG
 	cerr << "The tree pointer is NULL when deleting entry." << endl;
@@ -288,6 +288,9 @@ int BTree::compareEntry(const LeafEntry &pair1, const LeafEntry &pair2)
 
 RC BTree::loadNode(IXFileHandle &ixfileHandle, Node** &target)
 {
+	//Pretend that we read file to load the node
+	++ixfileHandle.ixReadPageCounter;
+
 	PageNum loadPageNum = (*target)->pageNum;
 	auto search = this->nodeMap.find(loadPageNum);
 	if (search != this->nodeMap.end())
@@ -300,7 +303,7 @@ RC BTree::loadNode(IXFileHandle &ixfileHandle, Node** &target)
 		if (ixfileHandle.readPage(loadPageNum, pageData) == -1)
 		{
 #ifdef DEBUG
-			cerr << "The target node points to a released memory when loading the node" << endl;
+			cerr << "Cannot read page " << loadPageNum << " when loading the node" << endl;
 #endif
 			free(pageData);
 			return -1;
@@ -315,9 +318,89 @@ RC BTree::loadNode(IXFileHandle &ixfileHandle, Node** &target)
 	return 0;
 }
 
-RC BTree::findLeaf(IXFileHandle &ixfileHandle, Node** root, const LeafEntry &pair, LeafNode** &result)
+RC BTree::removeEntryFromNode(Node** node, const LeafEntry &pair)
 {
-	Node** currentNode = root;
+	(*node)->isDirty = true;
+	if ((*node)->nodeType == InternalNodeType)
+	{
+		for (auto i = ((InternalNode*)*node)->internalEntries.begin(); i != ((InternalNode*)*node)->internalEntries.end(); i++)
+			if (compareKey(pair.key, i->key) == 0)
+			{
+				//Keep the last entry in root node left if we want to adjust the root
+				if ((*node == *this->root && ((InternalNode*)*node)->internalEntries.size() > 1) || *node != *this->root)
+					((InternalNode*)*node)->internalEntries.erase(i);
+				OffsetType decreaseSize = getEntrySize(InternalNodeType, pair, ((InternalNode*)*node)->internalEntries.size() == 0);
+				decreaseSize += sizeof(OffsetType); //The size of record offset in slot table
+				return 0;
+			}
+#ifdef DEBUG
+		cerr << "Cannot find the entry " << pair.rid.pageNum << ", " << pair.rid.slotNum << " when removing entry in an internal node" << endl;
+#endif
+		return -1;
+	}
+	else if ((*node)->nodeType == LeafNodeType)
+	{
+		for (auto i = ((LeafNode*)*node)->leafEntries.begin(); i != ((LeafNode*)*node)->leafEntries.end(); i++)
+			if (compareEntry(pair, *i) == 0)
+			{
+				((LeafNode*)*node)->leafEntries.erase(i);
+				OffsetType decreaseSize = getEntrySize(LeafNodeType, pair, ((LeafNode*)*node)->leafEntries.size() == 0);
+				decreaseSize += sizeof(OffsetType); //The size of record offset in slot table
+				return 0;
+			}
+#ifdef DEBUG
+		cerr << "Cannot find the entry " << pair.rid.pageNum << ", " << pair.rid.slotNum << " when removing entry in an leaf node" << endl;
+#endif
+		return -1;
+	}
+}
+
+OffsetType BTree::getEntrySize(int nodeType, const LeafEntry &pair, bool isLastEntry)
+{
+	if (nodeType == InternalNodeType)
+	{
+		OffsetType result = sizeof(PageNum); //size of left child page num
+		if (isLastEntry)
+			result += sizeof(PageNum);
+		if (this->attrType == AttrType::TypeInt)
+		{
+			result += sizeof(int);
+		}
+		else if (this->attrType == AttrType::TypeReal)
+		{
+			result += sizeof(float);
+		}
+		else if (this->attrType == AttrType::TypeVarChar)
+		{
+			int strLength = *(int*)pair.key;
+			result += sizeof(int) + strLength;
+		}
+		return result;
+	}
+	else if (nodeType == LeafNodeType)
+	{
+		OffsetType result = sizeof(PageNum) + sizeof(unsigned); //size of rid
+		if (this->attrType == AttrType::TypeInt)
+		{
+			result += sizeof(int);
+		}
+		else if (this->attrType == AttrType::TypeReal)
+		{
+			result += sizeof(float);
+		}
+		else if (this->attrType == AttrType::TypeVarChar)
+		{
+			int strLength = *(int*)pair.key;
+			result += sizeof(int) + strLength;
+		}
+		return result;
+	}
+}
+
+//Returns the leaf containing the given key.
+RC BTree::findLeaf(IXFileHandle &ixfileHandle, const LeafEntry &pair, LeafNode** &result)
+{
+	Node** currentNode = this->root;
 	if (currentNode == NULL) 
 	{
 #ifdef DEBUG
@@ -335,32 +418,32 @@ RC BTree::findLeaf(IXFileHandle &ixfileHandle, Node** root, const LeafEntry &pai
 	while ((*currentNode)->nodeType == InternalNodeType) 
 	{
 		int i = 0;
-		while (i < (*(InternalNode**)currentNode)->internalEntries.size())
+		while (i < ((InternalNode*)*currentNode)->internalEntries.size())
 		{
-			if (compareKey((*(InternalNode**)currentNode)->internalEntries[i].key, pair.key) < 0)
+			if (compareKey(((InternalNode*)*currentNode)->internalEntries[i].key, pair.key) < 0)
 				++i;
 			else
 				break;
 		}
-		if ((*(InternalNode**)currentNode)->internalEntries[i].leftChild)
+		if (((InternalNode*)*currentNode)->internalEntries[i].leftChild)
 		{
-			if (*(*(InternalNode**)currentNode)->internalEntries[i].leftChild)
+			if (*((InternalNode*)*currentNode)->internalEntries[i].leftChild)
 			{
-				if ((*(*(InternalNode**)currentNode)->internalEntries[i].leftChild)->isLoaded)
+				if ((*((InternalNode*)*currentNode)->internalEntries[i].leftChild)->isLoaded)
 				{
-					currentNode = (*(InternalNode**)currentNode)->internalEntries[i].leftChild;
+					currentNode = ((InternalNode*)*currentNode)->internalEntries[i].leftChild;
 				}
 				else
 				{
 					//If the node was not loaded before, we need to load it from page file
-					if (loadNode(ixfileHandle, (*(InternalNode**)currentNode)->internalEntries[i].leftChild) == -1)
+					if (loadNode(ixfileHandle, ((InternalNode*)*currentNode)->internalEntries[i].leftChild) == -1)
 					{
 #ifdef DEBUG
 						cerr << "Cannot load the left child node when finding the leaf" << endl;
 #endif
 						return -1;
 					}
-					currentNode = (*(InternalNode**)currentNode)->internalEntries[i].leftChild;
+					currentNode = ((InternalNode*)*currentNode)->internalEntries[i].leftChild;
 				}
 			}
 			else
@@ -384,10 +467,10 @@ RC BTree::findLeaf(IXFileHandle &ixfileHandle, Node** root, const LeafEntry &pai
 }
 
 //Finds and returns the record to which a key refers.
-RC BTree::findRecord(IXFileHandle &ixfileHandle, Node** root, const LeafEntry &pair, LeafEntry* &result)
+RC BTree::findRecord(IXFileHandle &ixfileHandle, const LeafEntry &pair, LeafEntry* &result)
 {
 	LeafNode** leaf = NULL;
-	if (findLeaf(ixfileHandle, root, pair, leaf) == -1)
+	if (findLeaf(ixfileHandle, pair, leaf) == -1)
 	{
 #ifdef DEBUG
 		cerr << "Cannot find the leaf node when finding record, rid = " << pair.rid.pageNum << ", " << pair.rid.slotNum << endl;
@@ -416,10 +499,58 @@ RC BTree::findRecord(IXFileHandle &ixfileHandle, Node** root, const LeafEntry &p
 	return 0;
 }
 
+RC BTree::adjustRoot(IXFileHandle &ixfileHandle)
+{
+	if ((*this->root)->nodeType == InternalNodeType && ((InternalNode*)*this->root)->internalEntries.size() > 0)
+		return 0;
+	if ((*this->root)->nodeType == LeafNodeType && ((LeafNode*)*this->root)->leafEntries.size() > 0)
+		return 0;
+	if ((*this->root)->nodeType == InternalNodeType)
+	{
+		Node** temp = this->root;
+		this->nodeMap.erase((*this->root)->pageNum);
+		this->root = ((InternalNode*)*this->root)->internalEntries[0].rightChild;
+		(*this->root)->parentPointer = NULL;
+		ixfileHandle.root = (*this->root)->pageNum;
+		delete *temp;
+		delete temp;
+	}
+	else
+	{
+		delete *this->root;
+		delete this->root;
+		this->root = NULL;
+	}
+	return 0;
+}
+
+//Get the index of the left neighbor of the node
+//If the node is the leftmost child of parent, return index = -1
+RC BTree::getNeighborIndex(Node** node, int &result)
+{
+	size_t internalEntriesSize = ((InternalNode*)((*node)->parentPointer))->internalEntries.size();
+	for (size_t i = 0; i < internalEntriesSize; i++)
+		if (*((InternalNode*)((*node)->parentPointer))->internalEntries[i].leftChild == *node)
+		{
+			result = i - 1;
+			return 0;
+		}
+	if (*((InternalNode*)((*node)->parentPointer))->internalEntries[internalEntriesSize - 1].rightChild == *node)
+	{
+		result = internalEntriesSize - 1;
+		return 0;
+	}
+#ifdef DEBUG
+	cerr << "Cannot find the left neighbor of the node when getting neighbor index" << endl;
+#endif
+	return -1;
+}
+
+//Deletes an entry from the B+ tree
 RC BTree::deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair)
 {
 	LeafEntry* leafRecord = NULL;
-	if (findRecord(ixfileHandle, this->root, pair, leafRecord) == -1)
+	if (findRecord(ixfileHandle, pair, leafRecord) == -1)
 	{
 #ifdef DEBUG
 		cerr << "Cannot find the record in the leaf node when deleting entry, rid = " << pair.rid.pageNum << ", " << pair.rid.slotNum << endl;
@@ -427,7 +558,7 @@ RC BTree::deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair)
 		return -1;
 	}
 	LeafNode** leaf = NULL;
-	if (findLeaf(ixfileHandle, this->root, pair, leaf) == -1)
+	if (findLeaf(ixfileHandle, pair, leaf) == -1)
 	{
 #ifdef DEBUG
 		cerr << "Cannot find the leaf node when deleting entry, rid = " << pair.rid.pageNum << ", " << pair.rid.slotNum << endl;
@@ -436,11 +567,25 @@ RC BTree::deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair)
 	}
 	if (leafRecord != NULL && leaf != NULL)
 	{
-
+		//Remove entry from node.
+		if (removeEntryFromNode((Node**)leaf, pair) == -1)
+		{
+#ifdef DEBUG
+			cerr << "Cannot remove the entry when deleting entry, rid = " << pair.rid.pageNum << ", " << pair.rid.slotNum << endl;
+#endif
+			return -1;
+		}
+		//Case: deletion from the root.
+		if (*leaf == *this->root)
+			return adjustRoot(ixfileHandle);
+		*
 	}
 	else
 	{
-
+#ifdef DEBUG
+		cerr << "Cannot find the target when deleting entry, rid = " << pair.rid.pageNum << ", " << pair.rid.slotNum << endl;
+#endif
+		return -1;
 	}
 	return 0;
 }
@@ -467,12 +612,12 @@ char* BTree::generatePage(const Node** node)
 	}
 	if ((*node)->nodeType == InternalNodeType)
 	{
-		OffsetType slotCount = (OffsetType)(*(const InternalNode**)node)->internalEntries.size();
+		OffsetType slotCount = (OffsetType)((const InternalNode*)*node)->internalEntries.size();
 		memcpy(pageData + PAGE_SIZE - sizeof(OffsetType), &slotCount, sizeof(OffsetType));
 		for (OffsetType i = 0; i < slotCount; i++)
 		{
 			//If the slot is not the last slot, we only write its left child in page
-			PageNum leftChildPageNum = (*(*(const InternalNode**)node)->internalEntries[i].leftChild)->pageNum;
+			PageNum leftChildPageNum = (*((const InternalNode*)*node)->internalEntries[i].leftChild)->pageNum;
 			memcpy(pageData + offset, &leftChildPageNum, sizeof(PageNum));
 			offset += sizeof(PageNum);
 			//Store slot offsets in slot table
@@ -480,24 +625,24 @@ char* BTree::generatePage(const Node** node)
 			//Store key of slot
 			if (this->attrType == AttrType::TypeInt)
 			{
-				memcpy(pageData + offset, (*(const InternalNode**)node)->internalEntries[i].key, sizeof(int));
+				memcpy(pageData + offset, ((const InternalNode*)*node)->internalEntries[i].key, sizeof(int));
 				offset += sizeof(int);
 			}
 			else if (this->attrType == AttrType::TypeReal)
 			{
-				memcpy(pageData + offset, (*(const InternalNode**)node)->internalEntries[i].key, sizeof(float));
+				memcpy(pageData + offset, ((const InternalNode*)*node)->internalEntries[i].key, sizeof(float));
 				offset += sizeof(float);
 			}
 			else if (this->attrType == AttrType::TypeVarChar)
 			{
-				int strLength = *(int*)(*(const InternalNode**)node)->internalEntries[i].key;
-				memcpy(pageData + offset, (*(const InternalNode**)node)->internalEntries[i].key, sizeof(int) + strLength);
+				int strLength = *(int*)((const InternalNode*)*node)->internalEntries[i].key;
+				memcpy(pageData + offset, ((const InternalNode*)*node)->internalEntries[i].key, sizeof(int) + strLength);
 				offset += sizeof(int) + strLength;
 			}
 			//If the slot is the last slot, we will also write its right child in page
 			if (i == slotCount - 1)
 			{
-				PageNum rightChildPageNum = (*(*(const InternalNode**)node)->internalEntries[i].rightChild)->pageNum;
+				PageNum rightChildPageNum = (*((const InternalNode*)*node)->internalEntries[i].rightChild)->pageNum;
 				memcpy(pageData + offset, &rightChildPageNum, sizeof(PageNum));
 				offset += sizeof(PageNum);
 			}
@@ -505,11 +650,11 @@ char* BTree::generatePage(const Node** node)
 	}
 	else if ((*node)->nodeType == LeafNodeType)
 	{
-		memcpy(pageData + offset, &(*(*(const LeafNode**)node)->rightPointer)->pageNum, sizeof(PageNum));
+		memcpy(pageData + offset, &(*((const LeafNode*)*node)->rightPointer)->pageNum, sizeof(PageNum));
 		offset += sizeof(PageNum);
-		memcpy(pageData + offset, &(*(*(const LeafNode**)node)->overflowPointer)->pageNum, sizeof(PageNum));
+		memcpy(pageData + offset, &(*((const LeafNode*)*node)->overflowPointer)->pageNum, sizeof(PageNum));
 		offset += sizeof(PageNum);
-		OffsetType slotCount = (OffsetType)(*(const LeafNode**)node)->leafEntries.size();
+		OffsetType slotCount = (OffsetType)((const LeafNode*)*node)->leafEntries.size();
 		memcpy(pageData + PAGE_SIZE - sizeof(OffsetType), &slotCount, sizeof(OffsetType));
 		for (OffsetType i = 0; i < slotCount; i++)
 		{
@@ -518,24 +663,24 @@ char* BTree::generatePage(const Node** node)
 			//Store key of slot
 			if (this->attrType == AttrType::TypeInt)
 			{
-				memcpy(pageData + offset, (*(const LeafNode**)node)->leafEntries[i].key, sizeof(int));
+				memcpy(pageData + offset, ((const LeafNode*)*node)->leafEntries[i].key, sizeof(int));
 				offset += sizeof(int);
 			}
 			else if (this->attrType == AttrType::TypeReal)
 			{
-				memcpy(pageData + offset, (*(const LeafNode**)node)->leafEntries[i].key, sizeof(float));
+				memcpy(pageData + offset, ((const LeafNode*)*node)->leafEntries[i].key, sizeof(float));
 				offset += sizeof(float);
 			}
 			else if (this->attrType == AttrType::TypeVarChar)
 			{
-				int strLength = *(int*)(*(const LeafNode**)node)->leafEntries[i].key;
-				memcpy(pageData + offset, (*(const LeafNode**)node)->leafEntries[i].key, sizeof(int) + strLength);
+				int strLength = *(int*)((const LeafNode*)*node)->leafEntries[i].key;
+				memcpy(pageData + offset, ((const LeafNode*)*node)->leafEntries[i].key, sizeof(int) + strLength);
 				offset += sizeof(int) + strLength;
 			}
 			//Store RID of slot
-			memcpy(pageData + offset, &(*(const LeafNode**)node)->leafEntries[i].rid.pageNum, sizeof(PageNum));
+			memcpy(pageData + offset, &((const LeafNode*)*node)->leafEntries[i].rid.pageNum, sizeof(PageNum));
 			offset += sizeof(PageNum);
-			memcpy(pageData + offset, &(*(const LeafNode**)node)->leafEntries[i].rid.slotNum, sizeof(unsigned));
+			memcpy(pageData + offset, &((const LeafNode*)*node)->leafEntries[i].rid.slotNum, sizeof(unsigned));
 			offset += sizeof(unsigned);
 		}
 	}
@@ -563,6 +708,8 @@ Node** BTree::generateNode(const char* data)
 		memcpy(&parent, data + offset, sizeof(PageNum));
 		offset += sizeof(PageNum);
 		if (parent != NULLNODE)
+			(*result)->parentPointer = this->nodeMap[parent];
+		else
 			(*result)->parentPointer = this->nodeMap[parent];
 
 		OffsetType slotCount;
@@ -606,7 +753,6 @@ Node** BTree::generateNode(const char* data)
 				*newNodePointer = new Node();
 				entry.leftChild = newNodePointer;
 				(*entry.leftChild)->pageNum = leftChildPageNum;
-				this->nodeMap[leftChildPageNum] = entry.leftChild;
 			}
 
 			//Generate right child pointer
@@ -623,10 +769,9 @@ Node** BTree::generateNode(const char* data)
 				*newNodePointer = new Node();
 				entry.rightChild = newNodePointer;
 				(*entry.rightChild)->pageNum = rightChildPageNum;
-				this->nodeMap[rightChildPageNum] = entry.rightChild;
 			}
 
-			(*(InternalNode**)result)->internalEntries.push_back(entry);
+			((InternalNode*)*result)->internalEntries.push_back(entry);
 		}
 	}
 	else if (nodeType == LeafNodeType)
@@ -644,22 +789,37 @@ Node** BTree::generateNode(const char* data)
 		offset += sizeof(PageNum);
 		if (parent != NULLNODE)
 			(*result)->parentPointer = this->nodeMap[parent];
+		else
+			(*result)->parentPointer = NULL;
 
 		PageNum rightPageNum;
 		memcpy(&rightPageNum, data + offset, sizeof(PageNum));
 		offset += sizeof(PageNum);
 		if (rightPageNum != NULLNODE)
-			(*(LeafNode**)result)->rightPointer = this->nodeMap[rightPageNum];
+		{
+			auto search = this->nodeMap.find(rightPageNum);
+			if (search != this->nodeMap.end())
+			{
+				((LeafNode*)*result)->rightPointer = this->nodeMap[rightPageNum];
+			}
+			else
+			{
+				Node** newNodePointer = new Node*;
+				*newNodePointer = new Node();
+				((LeafNode*)*result)->rightPointer = newNodePointer;
+				(*((LeafNode*)*result)->rightPointer)->pageNum = rightPageNum;
+			}
+		}
 		else
-			(*(LeafNode**)result)->rightPointer = NULL;
+			((LeafNode*)*result)->rightPointer = NULL;
 
 		PageNum overflowPageNum;
 		memcpy(&overflowPageNum, data + offset, sizeof(PageNum));
 		offset += sizeof(PageNum);
-		if (rightPageNum != NULLNODE)
-			(*(LeafNode**)result)->overflowPointer = (LeafNode**)this->nodeMap[overflowPageNum];
+		if (overflowPageNum != NULLNODE)
+			((LeafNode*)*result)->overflowPointer = (LeafNode**)this->nodeMap[overflowPageNum];
 		else
-			(*(LeafNode**)result)->overflowPointer = NULL;
+			((LeafNode*)*result)->overflowPointer = NULL;
 
 		OffsetType slotCount;
 		memcpy(&slotCount, data + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
@@ -690,7 +850,7 @@ Node** BTree::generateNode(const char* data)
 			memcpy(&entry.rid.pageNum, data + slotOffset + keyLength, sizeof(PageNum));
 			memcpy(&entry.rid.slotNum, data + slotOffset + keyLength + sizeof(PageNum), sizeof(unsigned));
 
-			(*(LeafNode**)result)->leafEntries.push_back(entry);
+			((LeafNode*)*result)->leafEntries.push_back(entry);
 		}
 	}
 	return result;

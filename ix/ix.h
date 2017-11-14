@@ -140,24 +140,6 @@ struct LeafEntry
 	}
 };
 
-class Node 
-{
-public:
-	Node();
-	~Node();
-
-	bool isOverflow();
-	bool isUnderflow();
-
-public:
-	MarkType nodeType;
-	OffsetType nodeSize;
-	Node** parentPointer;
-	bool isDirty;
-	PageNum pageNum;
-	bool isLoaded;
-};
-
 struct InternalEntry
 {
 	void* key;
@@ -207,14 +189,17 @@ public:
 
 	RC insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair);
 	RC deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair);
-	LeafNode* searchEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair);
 	char* generatePage(const Node** node);
 	Node** generateNode(const char* data);
-	RC findRecord(IXFileHandle &ixfileHandle, Node** root, const LeafEntry &pair, LeafEntry* &result);
-	RC findLeaf(IXFileHandle &ixfileHandle, Node** root, const LeafEntry &pair, LeafNode** &result);
+	RC findRecord(IXFileHandle &ixfileHandle, const LeafEntry &pair, LeafEntry* &result);
+	RC findLeaf(IXFileHandle &ixfileHandle, const LeafEntry &pair, LeafNode** &result);
 	int compareKey(void* v1, void* v2);
 	int compareEntry(const LeafEntry &pair1, const LeafEntry &pair2);
 	RC loadNode(IXFileHandle &ixfileHandle, Node** &target);
+	RC removeEntryFromNode(Node** node, const LeafEntry &pair);
+	OffsetType getEntrySize(int nodeType, const LeafEntry &pair, bool isLastEntry);
+	RC adjustRoot(IXFileHandle &ixfileHandle);
+	RC getNeighborIndex(Node** node, int &result);
 public:
 	Node** root;
 	Node** smallestLeaf;
