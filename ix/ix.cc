@@ -41,7 +41,7 @@ RC IndexManager::closeFile(IXFileHandle &ixfileHandle)
 
 RC IndexManager::insertEntry(IXFileHandle &ixfileHandle, const Attribute &attribute, const void *key, const RID &rid)
 {
-	LeafEntry leafEntry(attribute, key, rid);
+	LeafEntry leafEntry(attribute.type, key, rid);
     if(tree==NULL){
     	tree=new BTree();
     	tree->attrType=attribute.type;
@@ -57,7 +57,7 @@ RC IndexManager::deleteEntry(IXFileHandle &ixfileHandle, const Attribute &attrib
 {
 	if (this->tree) 
 	{
-		LeafEntry leafEntry(attribute, key, rid);
+		LeafEntry leafEntry(attribute.type, key, rid);
 		return this->tree->deleteEntry(ixfileHandle, leafEntry);
 	}
 #ifdef DEBUG
@@ -115,25 +115,45 @@ RC IXFileHandle::collectCounterValues(unsigned &readPageCount, unsigned &writePa
     return -1;
 }
 
-LeafEntry::LeafEntry(const Attribute &attribute, const void* key, const RID rid)
+LeafEntry::LeafEntry(const AttrType &attrType, const void* key, const RID rid)
 {
-	if (attribute.type == AttrType::TypeInt)
+	if (attrType == AttrType::TypeInt)
 	{
 		this->key = malloc(sizeof(int));
 		memcpy(this->key, key, sizeof(int));
 	}
-	else if (attribute.type == AttrType::TypeReal)
+	else if (attrType == AttrType::TypeReal)
 	{
 		this->key = malloc(sizeof(float));
 		memcpy(this->key, key, sizeof(float));
 	}
-	else if (attribute.type == AttrType::TypeVarChar)
+	else if (attrType == AttrType::TypeVarChar)
 	{
 		int strLength = *(int*)key;
 		this->key = malloc(sizeof(int) + strLength);
 		memcpy(this->key, key, sizeof(int) + strLength);
 	}
 	this->rid = rid;
+}
+
+InternalEntry::InternalEntry(const AttrType &attrType, const void* key)
+{
+	if (attrType == AttrType::TypeInt)
+	{
+		this->key = malloc(sizeof(int));
+		memcpy(this->key, key, sizeof(int));
+	}
+	else if (attrType == AttrType::TypeReal)
+	{
+		this->key = malloc(sizeof(float));
+		memcpy(this->key, key, sizeof(float));
+	}
+	else if (attrType == AttrType::TypeVarChar)
+	{
+		int strLength = *(int*)key;
+		this->key = malloc(sizeof(int) + strLength);
+		memcpy(this->key, key, sizeof(int) + strLength);
+	}
 }
 
 Node::Node()
@@ -501,12 +521,15 @@ RC BTree::findRecord(IXFileHandle &ixfileHandle, const LeafEntry &pair, LeafEntr
 
 RC BTree::adjustRoot(IXFileHandle &ixfileHandle)
 {
+	//Case: nonempty root. Key and pointer have already been deleted, so nothing to be done.
 	if ((*this->root)->nodeType == InternalNodeType && ((InternalNode*)*this->root)->internalEntries.size() > 0)
 		return 0;
 	if ((*this->root)->nodeType == LeafNodeType && ((LeafNode*)*this->root)->leafEntries.size() > 0)
 		return 0;
+	//Case: empty root.
 	if ((*this->root)->nodeType == InternalNodeType)
 	{
+		// If it has a child, promote the first (only) child as the new root.
 		Node** temp = this->root;
 		this->nodeMap.erase((*this->root)->pageNum);
 		this->root = ((InternalNode*)*this->root)->internalEntries[0].rightChild;
@@ -517,6 +540,7 @@ RC BTree::adjustRoot(IXFileHandle &ixfileHandle)
 	}
 	else
 	{
+		// If it is a leaf (has no children), then the whole tree is empty.
 		delete *this->root;
 		delete this->root;
 		this->root = NULL;
@@ -546,7 +570,162 @@ RC BTree::getNeighborIndex(Node** node, int &result)
 	return -1;
 }
 
+int BTree::getKeySize(const void* key)
+{
+	if (this->attrType == AttrType::TypeInt)
+		return sizeof(int);
+	else if (this->attrType == AttrType::TypeReal)
+		return sizeof(float);
+	else if (this->attrType == AttrType::TypeInt)
+	{
+		int strLength = *(int*)key;
+		return sizeof(int) + strLength;
+	}
+}
+
+RC BTree::getNodesMergeSize(Node** node1, Node** node2, int sizeOfParentKey, OffsetType &result)
+{
+	if ((*node1)->nodeType == InternalNodeType && (*node2)->nodeType == InternalNodeType)
+	{
+		size_t node2EntriesSize = (*node1)->nodeSize;
+		node2EntriesSize -= sizeof(MarkType) - sizeof(OffsetType) - sizeof(int); //Decrease size of nodeType, usedSpace, and parent pageNum
+		node2EntriesSize -= sizeof(int); //Derease size of a pointer in node2
+		node2EntriesSize -= sizeof(OffsetType); //Decrease size of slotCount in slot table
+		result = (*node1)->nodeSize + node2EntriesSize;
+		result += sizeof(int) + sizeOfParentKey + sizeof(int); //We need to add the key between nodes' pointers from their parent node
+		return 0;
+	}
+	else if ((*node1)->nodeType == LeafNodeType && (*node2)->nodeType == LeafNodeType)
+	{
+		size_t node2EntriesSize = (*node1)->nodeSize;
+		node2EntriesSize -= sizeof(MarkType) - sizeof(OffsetType) - sizeof(int) * 3; //Decrease size of nodeType, usedSpace, parent pageNum, right pageNum, and overflow PageNum
+		node2EntriesSize -= sizeof(OffsetType); //Decrease size of slotCount in slot table
+		result = (*node1)->nodeSize + node2EntriesSize;
+		return 0;
+	}
+#ifdef DEBUG
+	cerr << "Cannot get merge size with two different types of nodes" << endl;
+#endif
+	return -1;
+}
+
+RC BTree::mergeNodes(IXFileHandle &ixfileHandle, Node** node, Node** neighbor, int neighborIndex, int keyIndex, int keySize, int mergedNodeSize)
+{
+	//Swap neighbor with node if node is on the extreme left and neighbor is to its right.
+	if (neighborIndex == -1) 
+	{
+		Node** tmp = node;
+		node = neighbor;
+		neighbor = tmp;
+	}
+
+	if ((*node)->nodeType == InternalNodeType && (*neighbor)->nodeType == InternalNodeType)
+	{
+		//Append the key in parent to neighbor node
+		InternalEntry entryFromParent(this->attrType, ((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].key);
+		entryFromParent.leftChild = ((InternalNode*)*neighbor)->internalEntries.back().rightChild;
+		entryFromParent.rightChild = ((InternalNode*)*node)->internalEntries.front().leftChild;
+		((InternalNode*)*neighbor)->internalEntries.push_back(entryFromParent);
+
+		for (auto& i : ((InternalNode*)*node)->internalEntries)
+		{
+			InternalEntry entryFromNode(this->attrType, i.key);
+			entryFromNode.leftChild = i.leftChild;
+			entryFromNode.rightChild = i.rightChild;
+			//All children must now point up to the same parent.
+			(*entryFromNode.leftChild)->parentPointer = neighbor;
+			(*entryFromNode.rightChild)->parentPointer = neighbor;
+			((InternalNode*)*neighbor)->internalEntries.push_back(entryFromNode);
+		}
+
+		//Update the size of neighbor node
+		(*neighbor)->nodeSize = mergedNodeSize;
+		(*neighbor)->isDirty = true;
+	}
+	else if ((*node)->nodeType == LeafNodeType && (*neighbor)->nodeType == LeafNodeType)
+	{
+		for (auto& i : ((LeafNode*)*node)->leafEntries)
+		{
+			LeafEntry entryFromNode(this->attrType, i.key, i.rid);
+			((LeafNode*)*neighbor)->leafEntries.push_back(entryFromNode);
+		}
+
+		//Update the size of neighbor node
+		(*neighbor)->nodeSize = mergedNodeSize;
+		(*neighbor)->isDirty = true;
+	}
+	else
+	{
+#ifdef DEBUG
+		cerr << "The type of node and that of neighbor are different when merging nodes" << endl;
+#endif
+		return -1;
+	}
+	RID dummyRid;
+	dummyRid.pageNum = -1;
+	dummyRid.slotNum = -1;
+	LeafEntry pair(this->attrType, ((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].key, dummyRid);
+	if (doDelete(ixfileHandle, (*node)->parentPointer, pair) == -1)
+	{
+#ifdef DEBUG
+		cerr << "Cannot delete the parent node when merging nodes" << endl;
+#endif
+		return -1;
+	}
+
+	//Remove node from memory
+	this->nodeMap.erase((*node)->pageNum);
+	delete *node;
+	delete node;
+	return 0;
+}
+
 //Deletes an entry from the B+ tree
+RC BTree::doDelete(IXFileHandle &ixfileHandle, Node** node, const LeafEntry &pair)
+{
+	//Remove entry from node.
+	if (removeEntryFromNode(node, pair) == -1)
+	{
+#ifdef DEBUG
+		cerr << "Cannot remove the entry when deleting entry, rid = " << pair.rid.pageNum << ", " << pair.rid.slotNum << endl;
+#endif
+		return -1;
+	}
+	//Case: deletion from the root.
+	if (*node == *this->root)
+		return adjustRoot(ixfileHandle);
+	//Case: node stays at or above minimum.
+	if (!(*node)->isUnderflow())
+		return 0;
+	//Case: node falls below minimum. Either merge or redistribution is needed.
+	//Find the appropriate neighbor node with which to merge.
+	int neighborIndex;
+	if (getNeighborIndex(node, neighborIndex) == -1)
+	{
+#ifdef DEBUG
+		cerr << "Cannot get the neighbor node index when deleting entry, rid = " << pair.rid.pageNum << ", " << pair.rid.slotNum << endl;
+#endif
+		return -1;
+	}
+	//The index of key which between the pointer to the neighbor and the pointer to the node
+	int keyIndex = neighborIndex == -1 ? 0 : neighborIndex;
+	Node** neighbor = neighborIndex == -1 ? ((InternalNode*)*(*node)->parentPointer)->internalEntries[0].rightChild : ((InternalNode*)*(*node)->parentPointer)->internalEntries[neighborIndex].leftChild;
+	int keySize = getKeySize(((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].key);
+	OffsetType sizeOfMergeNodes;
+	if (getNodesMergeSize((Node**)node, neighbor, keySize, sizeOfMergeNodes) == -1)
+	{
+#ifdef DEBUG
+		cerr << "Cannot get size of the merged node when deleting entry, rid = " << pair.rid.pageNum << ", " << pair.rid.slotNum << endl;
+#endif
+		return -1;
+	}
+	if (sizeOfMergeNodes <= PAGE_SIZE)
+	{
+
+	}
+}
+
+//Master deletion function
 RC BTree::deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair)
 {
 	LeafEntry* leafRecord = NULL;
@@ -567,18 +746,13 @@ RC BTree::deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair)
 	}
 	if (leafRecord != NULL && leaf != NULL)
 	{
-		//Remove entry from node.
-		if (removeEntryFromNode((Node**)leaf, pair) == -1)
+		if (doDelete(ixfileHandle, (Node**)leaf, pair) == -1)
 		{
 #ifdef DEBUG
-			cerr << "Cannot remove the entry when deleting entry, rid = " << pair.rid.pageNum << ", " << pair.rid.slotNum << endl;
+			cerr << "Cannot delete the leaf node when deleting entry, rid = " << pair.rid.pageNum << ", " << pair.rid.slotNum << endl;
 #endif
 			return -1;
 		}
-		//Case: deletion from the root.
-		if (*leaf == *this->root)
-			return adjustRoot(ixfileHandle);
-		*
 	}
 	else
 	{

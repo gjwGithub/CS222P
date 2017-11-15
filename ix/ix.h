@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <string>
+#include <unordered_map>
 
 #include "../rbf/rbfm.h"
 
@@ -132,7 +133,7 @@ struct LeafEntry
 		rid.slotNum = -1;
 	}
 
-	LeafEntry(const Attribute &attribute, const void* key, const RID rid);
+	LeafEntry(const AttrType &attrType, const void* key, const RID rid);
 
 	~LeafEntry()
 	{
@@ -157,6 +158,8 @@ struct InternalEntry
 	{
 		delete this->key;
 	}
+
+	InternalEntry(const AttrType &attrType, const void* key);
 };
 
 class InternalNode: public Node 
@@ -196,10 +199,14 @@ public:
 	int compareKey(void* v1, void* v2);
 	int compareEntry(const LeafEntry &pair1, const LeafEntry &pair2);
 	RC loadNode(IXFileHandle &ixfileHandle, Node** &target);
+	RC doDelete(IXFileHandle &ixfileHandle, Node** node, const LeafEntry &pair);
 	RC removeEntryFromNode(Node** node, const LeafEntry &pair);
 	OffsetType getEntrySize(int nodeType, const LeafEntry &pair, bool isLastEntry);
 	RC adjustRoot(IXFileHandle &ixfileHandle);
 	RC getNeighborIndex(Node** node, int &result);
+	RC getNodesMergeSize(Node** node1, Node** node2, int sizeOfParentKey, OffsetType &result);
+	int getKeySize(const void* key);
+	RC mergeNodes(IXFileHandle &ixfileHandle, Node** node, Node** neighbor, int neighborIndex, int keyIndex, int keySize, int mergedNodeSize);
 public:
 	Node** root;
 	Node** smallestLeaf;
