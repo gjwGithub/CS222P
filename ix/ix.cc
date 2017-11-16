@@ -121,19 +121,30 @@ LeafEntry::LeafEntry(const AttrType &attrType, const void* key, const RID rid)
 	{
 		this->key = malloc(sizeof(int));
 		memcpy(this->key, key, sizeof(int));
+		this->size = sizeof(int);
 	}
 	else if (attrType == AttrType::TypeReal)
 	{
 		this->key = malloc(sizeof(float));
 		memcpy(this->key, key, sizeof(float));
+		this->size = sizeof(float);
 	}
 	else if (attrType == AttrType::TypeVarChar)
 	{
 		int strLength = *(int*)key;
 		this->key = malloc(sizeof(int) + strLength);
 		memcpy(this->key, key, sizeof(int) + strLength);
+		this->size = sizeof(int) + strLength;
 	}
 	this->rid = rid;
+}
+
+LeafEntry::LeafEntry(const LeafEntry &entry)
+{
+	this->key = malloc(entry.size);
+	memcpy(this->key, entry.key, entry.size);
+	this->size = entry.size;
+	this->rid = entry.rid;
 }
 
 InternalEntry::InternalEntry(const AttrType &attrType, const void* key)
@@ -141,19 +152,31 @@ InternalEntry::InternalEntry(const AttrType &attrType, const void* key)
 	if (attrType == AttrType::TypeInt)
 	{
 		this->key = malloc(sizeof(int));
+		this->size = sizeof(int);
 		memcpy(this->key, key, sizeof(int));
 	}
 	else if (attrType == AttrType::TypeReal)
 	{
 		this->key = malloc(sizeof(float));
+		this->size = sizeof(float);
 		memcpy(this->key, key, sizeof(float));
 	}
 	else if (attrType == AttrType::TypeVarChar)
 	{
 		int strLength = *(int*)key;
 		this->key = malloc(sizeof(int) + strLength);
+		this->size = sizeof(int) + strLength;
 		memcpy(this->key, key, sizeof(int) + strLength);
 	}
+}
+
+InternalEntry::InternalEntry(const InternalEntry &entry)
+{
+	this->key = malloc(entry.size);
+	memcpy(this->key, entry.key, entry.size);
+	this->size = entry.size;
+	this->leftChild = entry.leftChild;
+	this->rightChild = entry.rightChild;
 }
 
 Node::Node()
@@ -609,7 +632,7 @@ RC BTree::getNodesMergeSize(Node** node1, Node** node2, int sizeOfParentKey, Off
 	return -1;
 }
 
-RC BTree::mergeNodes(IXFileHandle &ixfileHandle, Node** node, Node** neighbor, int neighborIndex, int keyIndex, int keySize, int mergedNodeSize)
+RC BTree::mergeNodes(IXFileHandle &ixfileHandle, Node** node, Node** neighbor, int neighborIndex, int keyIndex, int keySize, OffsetType mergedNodeSize)
 {
 	//Swap neighbor with node if node is on the extreme left and neighbor is to its right.
 	if (neighborIndex == -1) 
@@ -680,6 +703,104 @@ RC BTree::mergeNodes(IXFileHandle &ixfileHandle, Node** node, Node** neighbor, i
 	return 0;
 }
 
+RC BTree::redistributeNodes(Node** node, Node** neighbor, int neighborIndex, int keyIndex, int keySize)
+{
+	if (neighborIndex != -1)
+	{
+		//Case: node has a neighbor to the left. 
+		//Pull the neighbor's last key-pointer pair over from the neighbor's right end to node's left end.
+		if ((*node)->nodeType == InternalNodeType && (*neighbor)->nodeType == InternalNodeType)
+		{
+			//Copy the rightmost key in the neighbor node and insert it in the front of node
+			//The value of the borrowed key is the middle key value
+			InternalEntry borrowedEntry(this->attrType, ((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].key);
+			borrowedEntry.leftChild = ((InternalNode*)*neighbor)->internalEntries.back().rightChild;
+			(*borrowedEntry.leftChild)->parentPointer = node;
+			borrowedEntry.rightChild = ((InternalNode*)*node)->internalEntries[0].leftChild;
+			((InternalNode*)*node)->internalEntries.insert(((InternalNode*)*node)->internalEntries.begin(), borrowedEntry);
+
+			//Update the middle key value in the parent node into the value of rightmost key in the neighbor node
+			InternalEntry parentEntry(this->attrType, ((InternalNode*)*neighbor)->internalEntries.back().key);
+			parentEntry.leftChild = ((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].leftChild;
+			parentEntry.rightChild = ((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].rightChild;
+			((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex] = parentEntry;
+
+			//Delete the entry in the neighbor node
+			((InternalNode*)*neighbor)->internalEntries.erase(((InternalNode*)*neighbor)->internalEntries.end() - 1);
+		}
+		else if ((*node)->nodeType == LeafNodeType && (*neighbor)->nodeType == LeafNodeType)
+		{
+			//Copy the rightmost key in the neighbor node and insert it in the front of node
+			LeafEntry borrowedEntry(this->attrType, ((LeafNode*)*neighbor)->leafEntries.back().key, ((LeafNode*)*neighbor)->leafEntries.back().rid);
+			((LeafNode*)*node)->leafEntries.insert(((LeafNode*)*node)->leafEntries.begin(), borrowedEntry);
+
+			//Update the middle key value in the parent node into the value of rightmost key in the neighbor node
+			InternalEntry parentEntry(this->attrType, ((LeafNode*)*node)->leafEntries[0].key);
+			parentEntry.leftChild = ((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].leftChild;
+			parentEntry.rightChild = ((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].rightChild;
+			((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex] = parentEntry;
+
+			//Delete the entry in the neighbor node
+			((LeafNode*)*neighbor)->leafEntries.erase(((LeafNode*)*neighbor)->leafEntries.end() - 1);
+		}
+		else
+		{
+#ifdef DEBUG
+			cerr << "The type of node and that of neighbor are different when redistributing nodes" << endl;
+#endif
+			return -1;
+		}
+	}
+	else
+	{
+		//Case: node is the leftmost child.
+		//Take a key-pointer pair from the neighbor to the right.
+		//Move the neighbor's leftmost key-pointer pair to node's rightmost position.
+		if ((*node)->nodeType == InternalNodeType && (*neighbor)->nodeType == InternalNodeType)
+		{
+			//Copy the rightmost key in the neighbor node and insert it in the front of node
+			//The value of the borrowed key is the middle key value
+			InternalEntry borrowedEntry(this->attrType, ((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].key);
+			borrowedEntry.leftChild = ((InternalNode*)*node)->internalEntries.back().rightChild;
+			(*borrowedEntry.rightChild)->parentPointer = node;
+			borrowedEntry.rightChild = ((InternalNode*)*neighbor)->internalEntries[0].leftChild;
+			((InternalNode*)*node)->internalEntries.push_back(borrowedEntry);
+
+			//Update the middle key value in the parent node into the value of leftmost key in the neighbor node
+			InternalEntry parentEntry(this->attrType, ((InternalNode*)*neighbor)->internalEntries[0].key);
+			parentEntry.leftChild = ((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].leftChild;
+			parentEntry.rightChild = ((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].rightChild;
+			((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex] = parentEntry;
+
+			//Delete the entry in the neighbor node
+			((InternalNode*)*neighbor)->internalEntries.erase(((InternalNode*)*neighbor)->internalEntries.begin());
+		}
+		else if ((*node)->nodeType == LeafNodeType && (*neighbor)->nodeType == LeafNodeType)
+		{
+			//Copy the rightmost key in the neighbor node and insert it in the front of node
+			LeafEntry borrowedEntry(this->attrType, ((LeafNode*)*neighbor)->leafEntries[0].key, ((LeafNode*)*neighbor)->leafEntries.back().rid);
+			((LeafNode*)*node)->leafEntries.push_back(borrowedEntry);
+
+			//Update the middle key value in the parent node into the value of leftmost key in the neighbor node
+			InternalEntry parentEntry(this->attrType, ((LeafNode*)*neighbor)->leafEntries[1].key);
+			parentEntry.leftChild = ((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].leftChild;
+			parentEntry.rightChild = ((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].rightChild;
+			((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex] = parentEntry;
+
+			//Delete the entry in the neighbor node
+			((LeafNode*)*neighbor)->leafEntries.erase(((LeafNode*)*neighbor)->leafEntries.begin());
+		}
+		else
+		{
+#ifdef DEBUG
+			cerr << "The type of node and that of neighbor are different when redistributing nodes, and the node is the leftmost node" << endl;
+#endif
+			return -1;
+		}
+	}
+	return 0;
+}
+
 //Deletes an entry from the B+ tree
 RC BTree::doDelete(IXFileHandle &ixfileHandle, Node** node, const LeafEntry &pair)
 {
@@ -720,9 +841,9 @@ RC BTree::doDelete(IXFileHandle &ixfileHandle, Node** node, const LeafEntry &pai
 		return -1;
 	}
 	if (sizeOfMergeNodes <= PAGE_SIZE)
-	{
-
-	}
+		return mergeNodes(ixfileHandle, node, neighbor, neighborIndex, keyIndex, keySize, sizeOfMergeNodes);
+	else
+		return redistributeNodes(node, neighbor, neighborIndex, keyIndex, keySize);
 }
 
 //Master deletion function
@@ -892,24 +1013,19 @@ Node** BTree::generateNode(const char* data)
 		{
 			OffsetType slotOffset;
 			memcpy(&slotOffset, data + PAGE_SIZE - sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
-			InternalEntry entry;
+			InternalEntry entry(this->attrType, data);
 			OffsetType keyLength = 0;
 			if (this->attrType = AttrType::TypeInt)
 			{
-				entry.key = malloc(sizeof(int));
-				memcpy(entry.key, data + slotOffset, sizeof(int));
 				keyLength = sizeof(int);
 			}
 			else if (this->attrType = AttrType::TypeReal)
 			{
-				entry.key = malloc(sizeof(float));
-				memcpy(entry.key, data + slotOffset, sizeof(float));
 				keyLength = sizeof(float);
 			}
 			else if (this->attrType = AttrType::TypeVarChar)
 			{
 				int strLength = *(int*)(data + slotOffset);
-				memcpy(entry.key, data + slotOffset, sizeof(int) + strLength);
 				keyLength = sizeof(int) + strLength;
 			}
 
@@ -1001,24 +1117,20 @@ Node** BTree::generateNode(const char* data)
 		{
 			OffsetType slotOffset;
 			memcpy(&slotOffset, data + PAGE_SIZE - sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
-			LeafEntry entry;
+			RID leafEntryRid;
+			LeafEntry entry(this->attrType, data, leafEntryRid);
 			OffsetType keyLength = 0;
 			if (this->attrType = AttrType::TypeInt)
 			{
-				entry.key = malloc(sizeof(int));
-				memcpy(entry.key, data + slotOffset, sizeof(int));
 				keyLength = sizeof(int);
 			}
 			else if (this->attrType = AttrType::TypeReal)
 			{
-				entry.key = malloc(sizeof(float));
-				memcpy(entry.key, data + slotOffset, sizeof(float));
 				keyLength = sizeof(float);
 			}
 			else if (this->attrType = AttrType::TypeVarChar)
 			{
 				int strLength = *(int*)(data + slotOffset);
-				memcpy(entry.key, data + slotOffset, sizeof(int) + strLength);
 				keyLength = sizeof(int) + strLength;
 			}
 			memcpy(&entry.rid.pageNum, data + slotOffset + keyLength, sizeof(PageNum));

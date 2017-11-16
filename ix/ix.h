@@ -88,6 +88,7 @@ class IXFileHandle {
     unsigned ixWritePageCounter;
     unsigned ixAppendPageCounter;
     FileHandle handle;
+	int root;
     // Constructor
     IXFileHandle();
 
@@ -121,8 +122,9 @@ public:
 	bool isLoaded;
 };
 
-struct LeafEntry
+class LeafEntry
 {
+public:
 	void* key;
 	RID rid;
 
@@ -137,12 +139,18 @@ struct LeafEntry
 
 	~LeafEntry()
 	{
-		delete this->key;
+		free(this->key);
 	}
+
+	LeafEntry(const LeafEntry &entry);
+
+private:
+	OffsetType size;
 };
 
-struct InternalEntry
+class InternalEntry
 {
+public:
 	void* key;
 	Node** leftChild;
 	Node** rightChild;
@@ -156,10 +164,15 @@ struct InternalEntry
 
 	~InternalEntry()
 	{
-		delete this->key;
+		free(this->key);
 	}
 
 	InternalEntry(const AttrType &attrType, const void* key);
+
+	InternalEntry(const InternalEntry &entry);
+
+private:
+	OffsetType size;
 };
 
 class InternalNode: public Node 
@@ -206,7 +219,8 @@ public:
 	RC getNeighborIndex(Node** node, int &result);
 	RC getNodesMergeSize(Node** node1, Node** node2, int sizeOfParentKey, OffsetType &result);
 	int getKeySize(const void* key);
-	RC mergeNodes(IXFileHandle &ixfileHandle, Node** node, Node** neighbor, int neighborIndex, int keyIndex, int keySize, int mergedNodeSize);
+	RC mergeNodes(IXFileHandle &ixfileHandle, Node** node, Node** neighbor, int neighborIndex, int keyIndex, int keySize, OffsetType mergedNodeSize);
+	RC redistributeNodes(Node** node, Node** neighbor, int neighborIndex, int keyIndex, int keySize);
 public:
 	Node** root;
 	Node** smallestLeaf;
