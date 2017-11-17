@@ -3,7 +3,8 @@
 
 #include <vector>
 #include <string>
-
+#include <unordered_map>
+#include <map>
 #include "../rbf/rbfm.h"
 
 # define IX_EOF (-1)  // end of the index scan
@@ -135,7 +136,7 @@ struct LeafEntry
 		rid.slotNum = -1;
 	}
 
-	LeafEntry(const Attribute &attribute, void* key, RID rid);
+	LeafEntry(const Attribute &attribute, const void* key, const RID rid);
 
 	~LeafEntry()
 	{
@@ -143,23 +144,23 @@ struct LeafEntry
 	}
 };
 
-class Node 
-{
-public:
-	Node();
-	~Node();
+// class Node 
+// {
+// public:
+// 	Node();
+// 	~Node();
 
-	bool isOverflow();
-	bool isUnderflow();
+// 	bool isOverflow();
+// 	bool isUnderflow();
 
-public:
-	MarkType nodeType;
-	OffsetType nodeSize;
-	Node** parentPointer;
-	bool isDirty;
-	PageNum pageNum;
-	bool isLoaded;
-};
+// public:
+// 	MarkType nodeType;
+// 	OffsetType nodeSize;
+// 	Node** parentPointer;
+// 	bool isDirty;
+// 	PageNum pageNum;
+// 	bool isLoaded;
+// };
 
 struct InternalEntry
 {
@@ -174,6 +175,7 @@ struct InternalEntry
 		this->rightChild = NULL;
 	}
 
+	InternalEntry(const Attribute &attribute, const void* key, Node** leftChild,Node** rightChild);
 	~InternalEntry()
 	{
 		delete this->key;
@@ -211,8 +213,9 @@ public:
 	RC insertEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
 	RC deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
 	LeafNode* searchEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
-	char* generatePage(const Node* node);
-	Node** generateNode(const char* data);
+	char* generatePage(Node** node);
+	Node** generateNode(char* data);
+	Node** findLeafnode(IXFileHandle &ixfileHandle,const LeafEntry &pair,Node** cur_node);
 public:
 	Node** root;
 	Node** smallestLeaf;
