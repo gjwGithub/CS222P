@@ -221,6 +221,8 @@ public:
 	int getKeySize(const void* key);
 	RC mergeNodes(IXFileHandle &ixfileHandle, Node** node, Node** neighbor, int neighborIndex, int keyIndex, int keySize, OffsetType mergedNodeSize);
 	RC redistributeNodes(Node** node, Node** neighbor, int neighborIndex, int keyIndex, int keySize);
+	RC refreshNodeSize(Node** node);
+	RC writeNodesBack(IXFileHandle &ixfileHandle);
 public:
 	Node** root;
 	Node** smallestLeaf;

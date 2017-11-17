@@ -215,6 +215,8 @@ InternalNode::InternalNode()
 
 InternalNode::~InternalNode()
 {
+	if (*this->parentPointer == NULL)
+		delete this->parentPointer;
 }
 
 LeafNode::LeafNode()
@@ -231,6 +233,12 @@ LeafNode::LeafNode()
 
 LeafNode::~LeafNode()
 {
+	if (*this->parentPointer == NULL)
+		delete this->parentPointer;
+	if (*this->rightPointer == NULL)
+		delete this->rightPointer;
+	if (*this->overflowPointer == NULL)
+		delete this->overflowPointer;
 }
 
 BTree::BTree()
@@ -244,7 +252,8 @@ BTree::~BTree()
 {
 	for (auto &item : this->nodeMap)
 	{
-		delete *item.second;
+		if (*item.second)
+			delete *item.second;
 		delete item.second;
 	}
 }
@@ -331,6 +340,14 @@ int BTree::compareEntry(const LeafEntry &pair1, const LeafEntry &pair2)
 
 RC BTree::loadNode(IXFileHandle &ixfileHandle, Node** &target)
 {
+	if (*target == NULL)
+	{
+#ifdef DEBUG
+		cerr << "The node is NULL when loading the node" << endl;
+#endif
+		return -1;
+	}
+
 	//Pretend that we read file to load the node
 	++ixfileHandle.ixReadPageCounter;
 
@@ -363,6 +380,14 @@ RC BTree::loadNode(IXFileHandle &ixfileHandle, Node** &target)
 
 RC BTree::removeEntryFromNode(Node** node, const LeafEntry &pair)
 {
+	if (*node == NULL)
+	{
+#ifdef DEBUG
+		cerr << "The node is NULL when removing entry from the node" << endl;
+#endif
+		return -1;
+	}
+
 	(*node)->isDirty = true;
 	if ((*node)->nodeType == InternalNodeType)
 	{
@@ -575,6 +600,14 @@ RC BTree::adjustRoot(IXFileHandle &ixfileHandle)
 //If the node is the leftmost child of parent, return index = -1
 RC BTree::getNeighborIndex(Node** node, int &result)
 {
+	if (*node == NULL)
+	{
+#ifdef DEBUG
+		cerr << "The node is NULL when getting neighbor index of the node" << endl;
+#endif
+		return -1;
+	}
+
 	size_t internalEntriesSize = ((InternalNode*)((*node)->parentPointer))->internalEntries.size();
 	for (size_t i = 0; i < internalEntriesSize; i++)
 		if (*((InternalNode*)((*node)->parentPointer))->internalEntries[i].leftChild == *node)
@@ -608,6 +641,21 @@ int BTree::getKeySize(const void* key)
 
 RC BTree::getNodesMergeSize(Node** node1, Node** node2, int sizeOfParentKey, OffsetType &result)
 {
+	if (*node1 == NULL)
+	{
+#ifdef DEBUG
+		cerr << "The node1 is NULL when getting nodes merge size" << endl;
+#endif
+		return -1;
+	}
+	if (*node2 == NULL)
+	{
+#ifdef DEBUG
+		cerr << "The node2 is NULL when getting nodes merge size" << endl;
+#endif
+		return -1;
+	}
+
 	if ((*node1)->nodeType == InternalNodeType && (*node2)->nodeType == InternalNodeType)
 	{
 		size_t node2EntriesSize = (*node1)->nodeSize;
@@ -634,6 +682,21 @@ RC BTree::getNodesMergeSize(Node** node1, Node** node2, int sizeOfParentKey, Off
 
 RC BTree::mergeNodes(IXFileHandle &ixfileHandle, Node** node, Node** neighbor, int neighborIndex, int keyIndex, int keySize, OffsetType mergedNodeSize)
 {
+	if (*node == NULL)
+	{
+#ifdef DEBUG
+		cerr << "The node is NULL when merging nodes" << endl;
+#endif
+		return -1;
+	}
+	if (*neighbor == NULL)
+	{
+#ifdef DEBUG
+		cerr << "The neighbor node is NULL when merging nodes" << endl;
+#endif
+		return -1;
+	}
+
 	//Swap neighbor with node if node is on the extreme left and neighbor is to its right.
 	if (neighborIndex == -1) 
 	{
@@ -699,12 +762,27 @@ RC BTree::mergeNodes(IXFileHandle &ixfileHandle, Node** node, Node** neighbor, i
 	//Remove node from memory
 	this->nodeMap.erase((*node)->pageNum);
 	delete *node;
-	delete node;
+	*node = NULL;
 	return 0;
 }
 
 RC BTree::redistributeNodes(Node** node, Node** neighbor, int neighborIndex, int keyIndex, int keySize)
 {
+	if (*node == NULL)
+	{
+#ifdef DEBUG
+		cerr << "The node is NULL when redistributing nodes" << endl;
+#endif
+		return -1;
+	}
+	if (*neighbor == NULL)
+	{
+#ifdef DEBUG
+		cerr << "The neighbor node is NULL when merging nodes" << endl;
+#endif
+		return -1;
+	}
+
 	if (neighborIndex != -1)
 	{
 		//Case: node has a neighbor to the left. 
@@ -798,12 +876,103 @@ RC BTree::redistributeNodes(Node** node, Node** neighbor, int neighborIndex, int
 			return -1;
 		}
 	}
+	//Update node and neighbor node
+	(*node)->isDirty = true;
+	if (refreshNodeSize(node) == -1)
+	{
+#ifdef DEBUG
+		cerr << "Cannot refresh the node when redistributing nodes" << endl;
+#endif
+		return -1;
+	}
+	(*neighbor)->isDirty = true;
+	if (refreshNodeSize(neighbor) == -1)
+	{
+#ifdef DEBUG
+		cerr << "Cannot refresh the neighbor node when redistributing nodes" << endl;
+#endif
+		return -1;
+	}
+	return 0;
+}
+
+RC BTree::refreshNodeSize(Node** node)
+{
+	if (*node == NULL)
+	{
+#ifdef DEBUG
+		cerr << "The node is NULL when refreshing node size" << endl;
+#endif
+		return -1;
+	}
+
+	if ((*node)->nodeType = InternalNodeType)
+	{
+		int size = sizeof(MarkType) + sizeof(OffsetType) + sizeof(PageNum); //type + usedspace + parent pointer
+		for (auto &i : ((InternalNode*)*node)->internalEntries)
+		{
+			size += sizeof(PageNum); //left page pointer
+			size += getKeySize(i.key); //key
+		}
+		size += sizeof(PageNum); //rightmost page pointer
+		size += ((InternalNode*)*node)->internalEntries.size() * sizeof(OffsetType); //slotOffsets
+		size += sizeof(OffsetType); //slotCount
+		(*node)->nodeSize = size;
+	}
+	else if ((*node)->nodeType = LeafNodeType)
+	{
+		int size = sizeof(MarkType) + sizeof(OffsetType) + sizeof(PageNum) * 3; //type + usedspace + parent pointer + right pointer + overflow pointer
+		for (auto &i : ((LeafNode*)*node)->leafEntries)
+		{
+			size += sizeof(PageNum); //left page pointer
+			size += getKeySize(i.key); //key
+		}
+		size += sizeof(PageNum); //rightmost page pointer
+		size += ((LeafNode*)*node)->leafEntries.size() * sizeof(OffsetType); //slotOffsets
+		size += sizeof(OffsetType); //slotCount
+		(*node)->nodeSize = size;
+	}
+	return 0;
+}
+
+RC BTree::writeNodesBack(IXFileHandle &ixfileHandle)
+{
+	for (auto &i : this->nodeMap)
+	{
+		if ((*i.second)->isDirty)
+		{
+			if (*i.second == NULL)
+			{
+#ifdef DEBUG
+				cerr << "The node is NULL when writing back nodes" << endl;
+#endif
+				return -1;
+			}
+			char* pageData = generatePage(i.second);
+			if (ixfileHandle.writePage(i.first, pageData) == -1)
+			{
+#ifdef DEBUG
+				cerr << "Cannot write the node back, pageNum = " << (*i.second)->pageNum << endl;
+#endif
+				return -1;
+			}
+			free(pageData);
+		}
+	}
 	return 0;
 }
 
 //Deletes an entry from the B+ tree
 RC BTree::doDelete(IXFileHandle &ixfileHandle, Node** node, const LeafEntry &pair)
 {
+	if (*node == NULL)
+	{
+#ifdef DEBUG
+		cerr << "The node is NULL when doing delete" << endl;
+#endif
+		return -1;
+	}
+
 	//Remove entry from node.
 	if (removeEntryFromNode(node, pair) == -1)
 	{
@@ -882,11 +1051,26 @@ RC BTree::deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair)
 #endif
 		return -1;
 	}
+	if (writeNodesBack(ixfileHandle) == -1)
+	{
+#ifdef DEBUG
+		cerr << "Cannot write the node back when deleting entry, rid = " << pair.rid.pageNum << ", " << pair.rid.slotNum << endl;
+#endif
+		return -1;
+	}
 	return 0;
 }
 
 char* BTree::generatePage(const Node** node)
 {
+	if (*node == NULL)
+	{
+#ifdef DEBUG
+		cerr << "The node is NULL when generating page" << endl;
+#endif
+		return NULL;
+	}
+
 	char* pageData = (char*)calloc(PAGE_SIZE, 1);
 	OffsetType offset = 0;
 	memcpy(pageData + offset, &(*node)->nodeType, sizeof(MarkType));
