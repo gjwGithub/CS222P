@@ -205,15 +205,33 @@ RC IndexManager::insertEntry(IXFileHandle &ixfileHandle, const Attribute &attrib
 
 RC IndexManager::deleteEntry(IXFileHandle &ixfileHandle, const Attribute &attribute, const void *key, const RID &rid)
 {
+	LeafEntry leafEntry(attribute.type, key, rid);
 	if (this->tree)
 	{
-		LeafEntry leafEntry(attribute.type, key, rid);
 		return this->tree->deleteEntry(ixfileHandle, leafEntry);
 	}
-#ifdef DEBUG
-	cerr << "The tree pointer is NULL when deleting entry." << endl;
-#endif
-	return -1;
+	else
+	{
+		this->tree = new BTree();
+		tree->attrType = attribute.type;
+
+		char *rootPage = (char*)malloc(PAGE_SIZE);
+		ixfileHandle.readPage(ixfileHandle.root, rootPage);
+		this->tree->root = this->tree->generateNode(rootPage);
+		(*this->tree->root)->pageNum = ixfileHandle.root;
+		free(rootPage);
+		this->tree->nodeMap.insert(make_pair(ixfileHandle.root, this->tree->root));
+
+		char *smallestLeafPage = (char*)malloc(PAGE_SIZE);
+		ixfileHandle.readPage(ixfileHandle.smallestLeaf, rootPage);
+		this->tree->root = this->tree->generateNode(smallestLeafPage);
+		(*this->tree->smallestLeaf)->pageNum = ixfileHandle.smallestLeaf;
+		free(smallestLeafPage);
+		this->tree->nodeMap.insert(make_pair(ixfileHandle.smallestLeaf, this->tree->smallestLeaf));
+
+		return this->tree->deleteEntry(ixfileHandle, leafEntry);
+	}
+	return 0;
 }
 
 RC IXFileHandle::readPage(PageNum pageNum, void *data) {
@@ -446,7 +464,6 @@ BTree::~BTree()
 		delete item.second;
 	}
 }
-
 
 RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
 	if (root == NULL) {
@@ -1871,7 +1888,7 @@ Node** BTree::generateNode(char* data)
 		if (parent != NULLNODE)
 			(*result)->parentPointer = this->nodeMap[parent];
 		else
-			(*result)->parentPointer = this->nodeMap[parent];
+			(*result)->parentPointer = NULL;
 
 		OffsetType slotCount;
 		memcpy(&slotCount, data + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
@@ -1911,7 +1928,6 @@ Node** BTree::generateNode(char* data)
 				entry.leftChild = newNodePointer;
 				(*entry.leftChild)->pageNum = leftChildPageNum;
 			}
-
 
 			//Generate right child pointer
 			OffsetType rightChildPointerOffset = slotOffset + keyLength;
