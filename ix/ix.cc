@@ -394,6 +394,26 @@ IX_ScanIterator::~IX_ScanIterator()
 {
 }
 
+int IX_ScanIterator::compareKey(const void* v1, const void* v2)
+{
+	if (this->attrType == AttrType::TypeInt)
+	{
+		return memcmp(v1, v2, sizeof(int));
+	}
+	else if (this->attrType == AttrType::TypeReal)
+	{
+		return memcmp(v1, v2, sizeof(float));
+	}
+	else if (this->attrType == AttrType::TypeVarChar)
+	{
+		int strLength1 = *(int*)v1;
+		int strLength2 = *(int*)v2;
+		string s1((char*)v1 + sizeof(int), strLength1);
+		string s2((char*)v2 + sizeof(int), strLength2);
+		return s1.compare(s2);
+	}
+}
+
 RC IX_ScanIterator::getNextEntry(RID &rid, void *key)
 {
 	if (!this->end)
