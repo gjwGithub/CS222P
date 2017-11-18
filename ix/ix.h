@@ -4,7 +4,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
-#include <map>
+
 #include "../rbf/rbfm.h"
 
 # define IX_EOF (-1)  // end of the index scan
@@ -90,6 +90,7 @@ class IXFileHandle {
     int root;
     int smallestLeaf;
     FileHandle handle;
+	int root;
     // Constructor
     IXFileHandle();
 
@@ -124,8 +125,9 @@ public:
 	bool isLoaded;
 };
 
-struct LeafEntry
+class LeafEntry
 {
+public:
 	void* key;
 	RID rid;
 
@@ -136,34 +138,24 @@ struct LeafEntry
 		rid.slotNum = -1;
 	}
 
-	LeafEntry(const Attribute &attribute, const void* key, const RID rid);
+
+	LeafEntry(const AttrType &attrType, const void* key, const RID rid);
+
 
 	~LeafEntry()
 	{
-		delete this->key;
+		free(this->key);
 	}
+	LeafEntry(const LeafEntry &entry);
+
+private:
+	OffsetType size;
 };
 
-// class Node 
-// {
-// public:
-// 	Node();
-// 	~Node();
 
-// 	bool isOverflow();
-// 	bool isUnderflow();
-
-// public:
-// 	MarkType nodeType;
-// 	OffsetType nodeSize;
-// 	Node** parentPointer;
-// 	bool isDirty;
-// 	PageNum pageNum;
-// 	bool isLoaded;
-// };
-
-struct InternalEntry
+class InternalEntry
 {
+public:
 	void* key;
 	Node** leftChild;
 	Node** rightChild;
@@ -178,8 +170,15 @@ struct InternalEntry
 	InternalEntry(const Attribute &attribute, const void* key, Node** leftChild,Node** rightChild);
 	~InternalEntry()
 	{
-		delete this->key;
+		free(this->key);
 	}
+
+	InternalEntry(const AttrType &attrType, const void* key);
+
+	InternalEntry(const InternalEntry &entry);
+
+private:
+	OffsetType size;
 };
 
 class InternalNode: public Node 
@@ -210,12 +209,26 @@ public:
 	BTree();
 	~BTree();
 
-	RC insertEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
-	RC deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
-	LeafNode* searchEntry(IXFileHandle &ixfileHandle, const LeafEntry pair);
-	char* generatePage(Node** node);
-	Node** generateNode(char* data);
-	Node** findLeafnode(IXFileHandle &ixfileHandle,const LeafEntry &pair,Node** cur_node);
+	RC insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair);
+	RC deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair);
+	char* generatePage(const Node** node);
+	Node** generateNode(const char* data);
+	RC findRecord(IXFileHandle &ixfileHandle, const LeafEntry &pair, LeafEntry* &result);
+	RC findLeaf(IXFileHandle &ixfileHandle, const LeafEntry &pair, LeafNode** &result);
+	int compareKey(void* v1, void* v2);
+	int compareEntry(const LeafEntry &pair1, const LeafEntry &pair2);
+	RC loadNode(IXFileHandle &ixfileHandle, Node** &target);
+	RC doDelete(IXFileHandle &ixfileHandle, Node** node, const LeafEntry &pair);
+	RC removeEntryFromNode(Node** node, const LeafEntry &pair);
+	OffsetType getEntrySize(int nodeType, const LeafEntry &pair, bool isLastEntry);
+	RC adjustRoot(IXFileHandle &ixfileHandle);
+	RC getNeighborIndex(Node** node, int &result);
+	RC getNodesMergeSize(Node** node1, Node** node2, int sizeOfParentKey, OffsetType &result);
+	int getKeySize(const void* key);
+	RC mergeNodes(IXFileHandle &ixfileHandle, Node** node, Node** neighbor, int neighborIndex, int keyIndex, int keySize, OffsetType mergedNodeSize);
+	RC redistributeNodes(Node** node, Node** neighbor, int neighborIndex, int keyIndex, int keySize);
+	RC refreshNodeSize(Node** node);
+	RC writeNodesBack(IXFileHandle &ixfileHandle);
 public:
 	Node** root;
 	Node** smallestLeaf;
