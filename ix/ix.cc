@@ -256,11 +256,11 @@ int IndexManager::compareKey(AttrType attrType, const void* v1, const void* v2)
 {
 	if (attrType == AttrType::TypeInt)
 	{
-		return memcmp(v1, v2, sizeof(int));
+		return *(int*)v1 - *(int*)v2;
 	}
 	else if (attrType == AttrType::TypeReal)
 	{
-		return memcmp(v1, v2, sizeof(float));
+		return *(float*)v1 - *(float*)v2;
 	}
 	else if (attrType == AttrType::TypeVarChar)
 	{
@@ -398,11 +398,11 @@ int IX_ScanIterator::compareKey(const void* v1, const void* v2)
 {
 	if (this->attrType == AttrType::TypeInt)
 	{
-		return memcmp(v1, v2, sizeof(int));
+		return *(int*)v1 - *(int*)v2;
 	}
 	else if (this->attrType == AttrType::TypeReal)
 	{
-		return memcmp(v1, v2, sizeof(float));
+		return *(float*)v1 - *(float*)v2;
 	}
 	else if (this->attrType == AttrType::TypeVarChar)
 	{
@@ -1111,11 +1111,11 @@ int BTree::compareKey(void* v1, void* v2)
 {
 	if (this->attrType == AttrType::TypeInt)
 	{
-		return memcmp(v1, v2, sizeof(int));
+		return *(int*)v1 - *(int*)v2;
 	}
 	else if (this->attrType == AttrType::TypeReal)
 	{
-		return memcmp(v1, v2, sizeof(float));
+		return *(float*)v1 - *(float*)v2;
 	}
 	else if (this->attrType == AttrType::TypeVarChar)
 	{
@@ -1132,15 +1132,17 @@ int BTree::compareEntry(const LeafEntry &pair1, const LeafEntry &pair2)
 	int keyCompareResult = 0;
 	if (this->attrType == AttrType::TypeInt)
 	{
-		keyCompareResult = memcmp(pair1.key, pair2.key, sizeof(int));
-		if (keyCompareResult != 0)
-			return keyCompareResult;
+		int k1 = *(int*)pair1.key;
+		int k2 = *(int*)pair2.key;
+		if (k1 != k2)
+			return k1 - k2;
 	}
 	else if (this->attrType == AttrType::TypeReal)
 	{
-		keyCompareResult = memcmp(pair1.key, pair2.key, sizeof(float));
-		if (keyCompareResult != 0)
-			return keyCompareResult;
+		int k1 = *(float*)pair1.key;
+		int k2 = *(float*)pair2.key;
+		if (k1 != k2)
+			return k1 - k2;
 	}
 	else if (this->attrType == AttrType::TypeVarChar)
 	{
