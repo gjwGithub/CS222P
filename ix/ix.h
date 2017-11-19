@@ -56,6 +56,7 @@ public:
 	void printBtree(IXFileHandle &ixfileHandle, const Attribute &attribute) const;
 
 	int compareKey(AttrType attrType, const void* v1, const void* v2);
+	RC refreshMetaData(IXFileHandle &ixfileHandle);
 
 	void BSF(IXFileHandle &ixfileHandle,Node** cur_node,const Attribute& attribute,int height) const;
 	void padding(int height) const;
@@ -126,7 +127,6 @@ public:
 
 	// Put the current counter values of associated PF FileHandles into variables
 	RC collectCounterValues(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount);
-
 };
 
 class Node
@@ -152,6 +152,7 @@ class LeafEntry
 public:
 	void* key;
 	RID rid;
+	OffsetType size;
 
 	LeafEntry()
 	{
@@ -168,9 +169,6 @@ public:
 	}
 
 	LeafEntry(const LeafEntry &entry);
-
-private:
-	OffsetType size;
 };
 
 
