@@ -44,6 +44,7 @@ RC IndexManager::createFile(const string &fileName)
 	unsigned ixAppendPageCounter = 0;
 	int root = -1;
 	int smallestLeaf = -1;
+	int pageCount = 0;
 	char* metaData = (char*)calloc(PAGE_SIZE, 1);
 	OffsetType offset = 0;
 	memcpy(metaData + offset, &ixReadPageCounter, sizeof(unsigned));
@@ -55,6 +56,8 @@ RC IndexManager::createFile(const string &fileName)
 	memcpy(metaData + offset, &root, sizeof(int));
 	offset += sizeof(int);
 	memcpy(metaData + offset, &smallestLeaf, sizeof(int));
+	offset += sizeof(int);
+	memcpy(metaData + offset, &pageCount, sizeof(int));
 	offset += sizeof(int);
 	size_t writeSize = fwrite(metaData, 1, PAGE_SIZE, file);
 	if (writeSize != PAGE_SIZE)
@@ -124,6 +127,8 @@ RC IXFileHandle::readMetaPage() {
 	offset += sizeof(int);
 	memcpy(&(this->smallestLeaf), data + offset, sizeof(int));
 	offset += sizeof(int);
+	memcpy(&(this->handle.pageCount), data + offset, sizeof(int));
+	offset += sizeof(int);
 	free(data);
 	return 0;
 }
@@ -155,6 +160,8 @@ RC IXFileHandle::writeMetaPage() {
 	offset += sizeof(int);
 	memcpy(data + offset, &(this->smallestLeaf), sizeof(int));
 	offset += sizeof(int);
+	memcpy(data + offset, &(this->handle.pageCount), sizeof(int));
+	offset += sizeof(int);
 	size_t writeSize = fwrite(data, 1, PAGE_SIZE, handle.file);
 	if (writeSize != PAGE_SIZE)
 	{
@@ -184,12 +191,47 @@ RC IndexManager::destroyFile(const string &fileName)
 
 RC IndexManager::openFile(const string &fileName, IXFileHandle &ixfileHandle)
 {
-	return PagedFileManager::instance()->openFile(fileName, ixfileHandle.handle);
+	if (PagedFileManager::instance()->openFile(fileName, ixfileHandle.handle) == -1)
+	{
+#ifdef DEBUG
+		cerr << "Open file error in open file" << endl;
+#endif
+		return -1;
+	}
+	if (ixfileHandle.readMetaPage() == -1)
+	{
+#ifdef DEBUG
+		cerr << "Read metadata error in open file" << endl;
+#endif
+		return -1;
+	}
+	return 0;
+}
+
+RC IndexManager::refreshMetaData(IXFileHandle &ixfileHandle)
+{
+	if (this->tree)
+	{
+		if (this->tree->root && (*this->tree->root))
+			ixfileHandle.root = (*this->tree->root)->pageNum;
+		else
+			ixfileHandle.root = NULLNODE;
+		if (this->tree->smallestLeaf && (*this->tree->smallestLeaf))
+			ixfileHandle.smallestLeaf = (*this->tree->smallestLeaf)->pageNum;
+		else
+			ixfileHandle.smallestLeaf = NULLNODE;
+	}
+	return 0;
 }
 
 RC IndexManager::closeFile(IXFileHandle &ixfileHandle)
 {
-	return PagedFileManager::instance()->closeFile(ixfileHandle.handle);
+	refreshMetaData(ixfileHandle);
+	if (ixfileHandle.writeMetaPage() == -1)
+		return -1;
+	if (PagedFileManager::instance()->closeFile(ixfileHandle.handle) == -1)
+		return -1;
+	return 0;
 }
 
 RC IndexManager::insertEntry(IXFileHandle &ixfileHandle, const Attribute &attribute, const void *key, const RID &rid)
@@ -295,7 +337,6 @@ RC IndexManager::scan(IXFileHandle &ixfileHandle,
 	ix_ScanIterator.lowKeyInclusive = lowKeyInclusive;
 	ix_ScanIterator.highKeyInclusive = highKeyInclusive;
 	ix_ScanIterator.end = false;
-
 	if (this->tree == NULL)
 	{
 		this->tree = new BTree();
@@ -308,72 +349,86 @@ RC IndexManager::scan(IXFileHandle &ixfileHandle,
 		free(rootPage);
 		this->tree->nodeMap.insert(make_pair(ixfileHandle.root, this->tree->root));
 
-		char *smallestLeafPage = (char*)malloc(PAGE_SIZE);
-		ixfileHandle.readPage(ixfileHandle.smallestLeaf, rootPage);
-		this->tree->root = this->tree->generateNode(smallestLeafPage);
-		(*this->tree->smallestLeaf)->pageNum = ixfileHandle.smallestLeaf;
-		free(smallestLeafPage);
-		this->tree->nodeMap.insert(make_pair(ixfileHandle.smallestLeaf, this->tree->smallestLeaf));
+		if (ixfileHandle.smallestLeaf == ixfileHandle.root)
+		{
+			this->tree->smallestLeaf = this->tree->root;
+		}
+		else
+		{
+			char *smallestLeafPage = (char*)malloc(PAGE_SIZE);
+			ixfileHandle.readPage(ixfileHandle.smallestLeaf, smallestLeafPage);
+			this->tree->smallestLeaf = this->tree->generateNode(smallestLeafPage);
+			(*this->tree->smallestLeaf)->pageNum = ixfileHandle.smallestLeaf;
+			free(smallestLeafPage);
+			this->tree->nodeMap.insert(make_pair(ixfileHandle.smallestLeaf, this->tree->smallestLeaf));
+		}
 	}
 	ix_ScanIterator.tree = this->tree;
-
-	RID dummyRid;
-	LeafEntry leafEntry(attribute.type, lowKey, dummyRid);
-	LeafNode** result = NULL;
-	if (this->tree->findLeaf(ixfileHandle, leafEntry, result) == -1)
+	if (lowKey == NULL)
 	{
-#ifdef DEBUG
-		cerr << "Cannot find the leaf node when scanning" << endl;
-#endif
-		return -1;
+		ix_ScanIterator.previousIndex = -1;
+		ix_ScanIterator.currentNode = (LeafNode**)this->tree->smallestLeaf;
 	}
-	bool foundKey = false;
-	while (!foundKey)
+	else
 	{
-		for (size_t i = 0; i < (*result)->leafEntries.size(); i++)
+		RID dummyRid;
+		LeafEntry leafEntry(attribute.type, lowKey, dummyRid);
+		LeafNode** result = NULL;
+		if (this->tree->findLeaf(ixfileHandle, leafEntry, result) == -1)
 		{
-			if (lowKeyInclusive)
-			{
-				if (compareKey(attribute.type, lowKey, (*result)->leafEntries[i].key) <= 0)
-				{
-					foundKey = true;
-					ix_ScanIterator.previousIndex = i - 1;
-					ix_ScanIterator.currentNode = result;
-					break;
-				}
-			}
-			else
-			{
-				if (compareKey(attribute.type, lowKey, (*result)->leafEntries[i].key) < 0)
-				{
-					foundKey = true;
-					ix_ScanIterator.previousIndex = i - 1;
-					ix_ScanIterator.currentNode = result;
-					break;
-				}
-			}
-		}
-		if (!foundKey)
-		{
-			if ((*result)->rightPointer && *(*result)->rightPointer)
-			{
-				if (!(*(*result)->rightPointer)->isLoaded)
-				{
-					//If the node was not loaded before, we need to load it from page file
-					if (this->tree->loadNode(ixfileHandle, (*result)->rightPointer) == -1)
-					{
 #ifdef DEBUG
-						cerr << "Cannot load the right pointer node when scanning" << endl;
+			cerr << "Cannot find the leaf node when scanning" << endl;
 #endif
-						return -1;
+			return -1;
+		}
+		bool foundKey = false;
+		while (!foundKey)
+		{
+			for (size_t i = 0; i < (*result)->leafEntries.size(); i++)
+			{
+				if (lowKeyInclusive)
+				{
+					if (compareKey(attribute.type, lowKey, (*result)->leafEntries[i].key) <= 0)
+					{
+						foundKey = true;
+						ix_ScanIterator.previousIndex = i - 1;
+						ix_ScanIterator.currentNode = result;
+						break;
 					}
 				}
-				result = (LeafNode**)((*result)->rightPointer);
+				else
+				{
+					if (compareKey(attribute.type, lowKey, (*result)->leafEntries[i].key) < 0)
+					{
+						foundKey = true;
+						ix_ScanIterator.previousIndex = i - 1;
+						ix_ScanIterator.currentNode = result;
+						break;
+					}
+				}
 			}
-			else
+			if (!foundKey)
 			{
-				ix_ScanIterator.end = true;
-				break;
+				if ((*result)->rightPointer && *(*result)->rightPointer)
+				{
+					if (!(*(*result)->rightPointer)->isLoaded)
+					{
+						//If the node was not loaded before, we need to load it from page file
+						if (this->tree->loadNode(ixfileHandle, (*result)->rightPointer) == -1)
+						{
+#ifdef DEBUG
+							cerr << "Cannot load the right pointer node when scanning" << endl;
+#endif
+							return -1;
+						}
+					}
+					result = (LeafNode**)((*result)->rightPointer);
+				}
+				else
+				{
+					ix_ScanIterator.end = true;
+					break;
+				}
 			}
 		}
 	}
@@ -598,36 +653,48 @@ RC IX_ScanIterator::getNextEntry(RID &rid, void *key)
 			if ((*this->currentNode)->leafEntries[previousIndex].rid.pageNum != this->previousRID.pageNum || (*this->currentNode)->leafEntries[previousIndex].rid.slotNum != this->previousRID.slotNum)
 				--currentIndex;
 		}
-		//If current key exceeds the high key
-		if (this->highKeyInclusive && compareKey((*this->currentNode)->leafEntries[currentIndex].key, this->highKey) > 0)
+		if (this->highKey)
 		{
-			this->end = true;
-			return IX_EOF;
-		}
-		if (!this->highKeyInclusive && compareKey((*this->currentNode)->leafEntries[currentIndex].key, this->highKey) >= 0)
-		{
-			this->end = true;
-			return IX_EOF;
+			//If current key exceeds the high key
+			if (this->highKeyInclusive && compareKey((*this->currentNode)->leafEntries[currentIndex].key, this->highKey) > 0)
+			{
+				this->end = true;
+				return IX_EOF;
+			}
+			if (!this->highKeyInclusive && compareKey((*this->currentNode)->leafEntries[currentIndex].key, this->highKey) >= 0)
+			{
+				this->end = true;
+				return IX_EOF;
+			}
 		}
 		rid = (*this->currentNode)->leafEntries[currentIndex].rid;
 		key = (*this->currentNode)->leafEntries[currentIndex].key;
 		//If the current key is the last key in leaf node
 		if (currentIndex == (*this->currentNode)->leafEntries.size() - 1)
 		{
-			if (!(*(*currentNode)->rightPointer)->isLoaded)
+			//Whether the current node is the rightmost leaf node
+			if ((*currentNode)->rightPointer == NULL || *(*currentNode)->rightPointer == NULL)
 			{
-				//If the node was not loaded before, we need to load it from page file
-				if (this->tree->loadNode(*this->ixfileHandle, (*currentNode)->rightPointer) == -1)
-				{
-#ifdef DEBUG
-					cerr << "Cannot load the right pointer node when getting next entry" << endl;
-#endif
-					return -1;
-				}
+				this->end = true;
+				return 0;
 			}
-			this->currentNode = (LeafNode**)(*currentNode)->rightPointer;
-			this->previousIndex = -1;
-			this->previousRID = RID();
+			else
+			{
+				if (!(*(*currentNode)->rightPointer)->isLoaded)
+				{
+					//If the node was not loaded before, we need to load it from page file
+					if (this->tree->loadNode(*this->ixfileHandle, (*currentNode)->rightPointer) == -1)
+					{
+#ifdef DEBUG
+						cerr << "Cannot load the right pointer node when getting next entry" << endl;
+#endif
+						return -1;
+					}
+				}
+				this->currentNode = (LeafNode**)(*currentNode)->rightPointer;
+				this->previousIndex = -1;
+				this->previousRID = RID();
+			}
 		}
 		else
 		{
@@ -650,6 +717,8 @@ IXFileHandle::IXFileHandle()
 	ixReadPageCounter = 0;
 	ixWritePageCounter = 0;
 	ixAppendPageCounter = 0;
+	root = NULLNODE;
+	smallestLeaf = NULLNODE;
 }
 
 IXFileHandle::~IXFileHandle()
@@ -688,6 +757,14 @@ LeafEntry::LeafEntry(const AttrType &attrType, const void* key, const RID rid)
 	this->rid = rid;
 }
 
+LeafEntry::LeafEntry(const LeafEntry &entry)
+{
+	this->key = malloc(entry.size);
+	memcpy(this->key, entry.key, entry.size);
+	this->size = entry.size;
+	this->rid = entry.rid;
+}
+
 InternalEntry::InternalEntry(const AttrType &attribute, const void* key, Node** leftChild, Node** rightChild)
 {
 	if (attribute == AttrType::TypeInt)
@@ -708,14 +785,6 @@ InternalEntry::InternalEntry(const AttrType &attribute, const void* key, Node** 
 	}
 	this->leftChild = leftChild;
 	this->rightChild = rightChild;
-}
-
-LeafEntry::LeafEntry(const LeafEntry &entry)
-{
-	this->key = malloc(entry.size);
-	memcpy(this->key, entry.key, entry.size);
-	this->size = entry.size;
-	this->rid = entry.rid;
 }
 
 InternalEntry::InternalEntry(const AttrType &attrType, const void* key)
@@ -1326,7 +1395,6 @@ int BTree::compareKey(void* v1, void* v2)
 
 int BTree::compareEntry(const LeafEntry &pair1, const LeafEntry &pair2)
 {
-	int keyCompareResult = 0;
 	if (this->attrType == AttrType::TypeInt)
 	{
 		int k1 = *(int*)pair1.key;
@@ -1347,7 +1415,7 @@ int BTree::compareEntry(const LeafEntry &pair1, const LeafEntry &pair2)
 		int strLength2 = *(int*)pair2.key;
 		string s1((char*)pair1.key + sizeof(int), strLength1);
 		string s2((char*)pair2.key + sizeof(int), strLength2);
-		keyCompareResult = s1.compare(s2);
+		int keyCompareResult = s1.compare(s2);
 		if (keyCompareResult != 0)
 			return keyCompareResult;
 	}
@@ -1358,7 +1426,7 @@ int BTree::compareEntry(const LeafEntry &pair1, const LeafEntry &pair2)
 
 RC BTree::loadNode(IXFileHandle &ixfileHandle, Node** &target)
 {
-	if (*target == NULL)
+	if (target == NULL || *target == NULL)
 	{
 #ifdef DEBUG
 		cerr << "The node is NULL when loading the node" << endl;
@@ -1368,7 +1436,6 @@ RC BTree::loadNode(IXFileHandle &ixfileHandle, Node** &target)
 
 	//Pretend that we read file to load the node
 	++ixfileHandle.ixReadPageCounter;
-
 	PageNum loadPageNum = (*target)->pageNum;
 	auto search = this->nodeMap.find(loadPageNum);
 	if (search != this->nodeMap.end())
