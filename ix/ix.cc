@@ -272,12 +272,19 @@ RC IndexManager::deleteEntry(IXFileHandle &ixfileHandle, const Attribute &attrib
 		free(rootPage);
 		this->tree->nodeMap.insert(make_pair(ixfileHandle.root, this->tree->root));
 
-		char *smallestLeafPage = (char*)malloc(PAGE_SIZE);
-		ixfileHandle.readPage(ixfileHandle.smallestLeaf, rootPage);
-		this->tree->root = this->tree->generateNode(smallestLeafPage);
-		(*this->tree->smallestLeaf)->pageNum = ixfileHandle.smallestLeaf;
-		free(smallestLeafPage);
-		this->tree->nodeMap.insert(make_pair(ixfileHandle.smallestLeaf, this->tree->smallestLeaf));
+		if (ixfileHandle.root == ixfileHandle.smallestLeaf)
+		{
+			this->tree->smallestLeaf = this->tree->root;
+		}
+		else
+		{
+			char *smallestLeafPage = (char*)malloc(PAGE_SIZE);
+			ixfileHandle.readPage(ixfileHandle.smallestLeaf, smallestLeafPage);
+			this->tree->smallestLeaf = this->tree->generateNode(smallestLeafPage);
+			(*this->tree->smallestLeaf)->pageNum = ixfileHandle.smallestLeaf;
+			free(smallestLeafPage);
+			this->tree->nodeMap.insert(make_pair(ixfileHandle.smallestLeaf, this->tree->smallestLeaf));
+		}
 
 		return this->tree->deleteEntry(ixfileHandle, leafEntry);
 	}
@@ -2519,7 +2526,9 @@ Node** BTree::generateNode(char* data)
 				int strLength = *(int*)(data + slotOffset);
 				keyLength = sizeof(int) + strLength;
 			}
-			memcpy(&entry.rid.pageNum, data + slotOffset, keyLength);
+			entry.size = keyLength;
+			entry.key = malloc(keyLength);
+			memcpy(entry.key, data + slotOffset, keyLength);
 			memcpy(&entry.rid.pageNum, data + slotOffset + keyLength, sizeof(PageNum));
 			memcpy(&entry.rid.slotNum, data + slotOffset + keyLength + sizeof(PageNum), sizeof(unsigned));
 

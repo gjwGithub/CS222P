@@ -152,6 +152,7 @@ class LeafEntry
 public:
 	void* key;
 	RID rid;
+	OffsetType size;
 
 	LeafEntry()
 	{
@@ -168,9 +169,6 @@ public:
 	}
 
 	LeafEntry(const LeafEntry &entry);
-
-private:
-	OffsetType size;
 };
 
 
