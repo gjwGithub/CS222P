@@ -41,6 +41,7 @@ int testCase_6(const string &indexFileName, const Attribute &attribute)
     for(unsigned i = 0; i <= numOfTuples; i++)
     {
         key = i; 
+        cout<<"records"<<key<<endl;
         rid.pageNum = key;
         rid.slotNum = key * 3;
 
