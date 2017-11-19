@@ -248,6 +248,7 @@ RC IndexManager::insertEntry(IXFileHandle &ixfileHandle, const Attribute &attrib
 		tree->root==NULL;
 	}
 	cout<<"come to tree insert"<<endl;
+	cout<<"                                 root                        "<<ixfileHandle.root<<endl;
 	RC rel = tree->insertEntry(ixfileHandle, leafEntry);
 	return rel;
 
@@ -344,6 +345,7 @@ RC IndexManager::scan(IXFileHandle &ixfileHandle,
 	ix_ScanIterator.lowKeyInclusive = lowKeyInclusive;
 	ix_ScanIterator.highKeyInclusive = highKeyInclusive;
 	ix_ScanIterator.end = false;
+
 	if (this->tree == NULL)
 	{
 		this->tree = new BTree();
@@ -958,6 +960,7 @@ RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
 				ixfileHandle.readPage(ixfileHandle.root, data);
 				root_node = generateNode((char *)data);
 				nodeMap.insert(make_pair(ixfileHandle.root, root_node));
+				free(data);
 			}
 			cout<<"1"<<endl;
 			Node** tar_leafNode = findLeafnode(ixfileHandle, pair, root_node);     //find the inserted leaf node
@@ -968,6 +971,7 @@ RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
 				ixfileHandle.readPage(cur_pageNum, data);
 				tar_leafNode = generateNode((char *)data);
 				nodeMap.insert(make_pair(cur_pageNum, tar_leafNode));
+				free(data);
 			}
 			cout<<"3"<<endl;
 			//first insert the entry to the origin leafnode
@@ -997,6 +1001,7 @@ RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
 				ixfileHandle.writePage((*(LeafNode**)tar_leafNode)->pageNum, new_page);
 				free(new_page);
 				cout<<"6"<<endl;
+				return 0;
 			}
 			else {                                                        //split node;
 				Node** new_node = new Node*;
@@ -1023,17 +1028,14 @@ RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
 				int var_length;
 				void* key_mid;
 				if (attrType == TypeVarChar) {
-					memcpy(&var_length, (char *)((LeafNode*)*new_node)->leafEntries[mid_index].key, 4);
+					memcpy(&var_length, (char *)((LeafNode*)*tar_leafNode)->leafEntries[mid_index].key, 4);
 					key_mid = malloc(sizeof(int) + var_length);
-					memcpy((char *)key_mid, (char *)((LeafNode*)*new_node)->leafEntries[mid_index].key, sizeof(int) + var_length);
+					memcpy((char *)key_mid, (char *)((LeafNode*)*tar_leafNode)->leafEntries[mid_index].key, sizeof(int) + var_length);
 				}
 				else {
-					cout<<"111"<<endl;
 					var_length = 4;
 					key_mid = malloc(sizeof(int));
-					cout<<"slot"<<((LeafNode*)*new_node)->leafEntries[mid_index].rid.slotNum<<endl;
-					memcpy((char *)key_mid, (char *)((LeafNode*)*new_node)->leafEntries[mid_index].key, sizeof(int));
-					cout<<"keyvalue"<<*(int *)key_mid<<endl;
+					memcpy((char *)key_mid, (char *)((LeafNode*)*tar_leafNode)->leafEntries[mid_index].key, sizeof(int));
 				}
 				cout<<"22"<<endl;
 				//delete the second half records from the origin leafnode.
@@ -1047,8 +1049,8 @@ RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
 				((LeafNode*)*new_node)->nodeType = LeafNodeType;
 				cout<<"44"<<endl;
 				//if it dont have the parentNode,create a parentNode
-				if (*((*(LeafNode**)tar_leafNode)->parentPointer) == NULL) {
-					cout<<"55"<<endl;
+				if (((*(LeafNode**)tar_leafNode)->parentPointer) == NULL) {
+					cout<<"                                    create new root                    "<<endl;
 					((LeafNode*)*new_node)->pageNum = ixfileHandle.ixAppendPageCounter + 1;  //assume the new leaf node will append in ixappendpageCounter th
 					InternalEntry internal_pair(attrType, ((LeafNode*)*new_node)->leafEntries[0].key, tar_leafNode, new_node);
 					Node** new_parentNode = new Node*;
@@ -1072,6 +1074,7 @@ RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
 					cout<<"88"<<endl;
 					ixfileHandle.root = ixfileHandle.ixAppendPageCounter - 1;
 					ixfileHandle.writeMetaPage();
+					cout<<"                                new root page                       "<<ixfileHandle.root<<endl;
 					//update the origin leafnode to the file
 					cout<<"99"<<endl;
 					void* new_originLeafpage = generatePage(tar_leafNode);
@@ -1087,8 +1090,10 @@ RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
 					free(new_newLeafpage);
 				}
 				else {  // it have the parentNode
+					cout<<"00"<<endl;
 					Node** origin_parentNode = new Node*;
 					PageNum origin_parentNode_pagenum = ((InternalNode*)*((*(LeafNode**)tar_leafNode)->parentPointer))->pageNum;
+					cout<<"parent page num"<<origin_parentNode_pagenum;
 					iter = nodeMap.find(origin_parentNode_pagenum);
 					if (iter != nodeMap.end()) {
 						origin_parentNode = iter->second;
@@ -1279,6 +1284,7 @@ RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
 				}
 			}
 		}
+		return 0;
 }
 
 Node** BTree::findLeafnode(IXFileHandle &ixfileHandle, const LeafEntry &pair, Node** cur_node) {
