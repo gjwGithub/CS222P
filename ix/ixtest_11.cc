@@ -49,7 +49,7 @@ int testCase_11(const string &indexFileName, const Attribute &attribute){
             cerr << inRecordNum << " inserted - rid: " << rid.pageNum << " " << rid.slotNum << endl;
         }
     }
-
+    cout<<"1234"<<endl;
     // scan
     rc = indexManager->scan(ixfileHandle, attribute, NULL, NULL, true, true, ix_ScanIterator);
     assert(rc == success && "indexManager::scan() should not fail.");

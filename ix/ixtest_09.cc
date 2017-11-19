@@ -67,7 +67,7 @@ int testCase_9(const string &indexFileName, const Attribute &attribute) {
             inRidSlotNumSum += rid.slotNum;
         }
     }
-
+    cout<<"1234"<<endl;
     // scan
     rc = indexManager->scan(ixfileHandle, attribute, NULL, &compVal, true, false, ix_ScanIterator);
     assert(rc == success && "indexManager::scan() should not fail.");

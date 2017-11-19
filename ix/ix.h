@@ -19,6 +19,7 @@ class IXFileHandle;
 class BTree;
 class Node;
 class LeafEntry;
+class LeafNode;
 class IndexManager {
 
 public:
@@ -53,6 +54,9 @@ public:
 
 	// Print the B+ tree in pre-order (in a JSON record format)
 	void printBtree(IXFileHandle &ixfileHandle, const Attribute &attribute) const;
+
+	int compareKey(AttrType attrType, const void* v1, const void* v2);
+
 	void BSF(IXFileHandle &ixfileHandle,Node** cur_node,const Attribute& attribute,int height) const;
 	void padding(int height) const;
 	void print_leafkeys(AttrType attrType,Node** cur_node,int start,int end) const;
@@ -68,7 +72,6 @@ private:
 	static IndexManager *_index_manager;
 };
 
-
 class IX_ScanIterator {
 public:
 
@@ -83,9 +86,22 @@ public:
 
 	// Terminate index scan
 	RC close();
+
+	int compareKey(const void* v1, const void* v2);
+
+public:
+	AttrType attrType;
+	LeafNode** currentNode;
+	int previousIndex;
+	RID previousRID;
+	IXFileHandle *ixfileHandle;
+	const void *lowKey;
+	const void *highKey;
+	bool lowKeyInclusive;
+	bool highKeyInclusive;
+	bool end;
+	BTree* tree;
 };
-
-
 
 class IXFileHandle {
 public:
@@ -219,7 +235,7 @@ public:
 	RC deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair);
 	char* generatePage(Node** node);
 	Node** generateNode(char* data);
-	RC findRecord(IXFileHandle &ixfileHandle, const LeafEntry &pair, LeafEntry* &result);
+	RC findRecord(IXFileHandle &ixfileHandle, const LeafEntry &pair, vector<LeafEntry>::iterator &result);
 	RC findLeaf(IXFileHandle &ixfileHandle, const LeafEntry &pair, LeafNode** &result);
 	int compareKey(void* v1, void* v2);
 	int compareEntry(const LeafEntry &pair1, const LeafEntry &pair2);
