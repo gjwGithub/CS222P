@@ -17,6 +17,8 @@
 class IX_ScanIterator;
 class IXFileHandle;
 class BTree;
+class Node;
+class LeafEntry;
 class IndexManager {
 
 public:
@@ -51,9 +53,15 @@ public:
 
 	// Print the B+ tree in pre-order (in a JSON record format)
 	void printBtree(IXFileHandle &ixfileHandle, const Attribute &attribute) const;
-	BTree* tree;
 
 	int compareKey(AttrType attrType, const void* v1, const void* v2);
+
+	void BSF(IXFileHandle &ixfileHandle,Node** cur_node,const Attribute& attribute,int height) const;
+	void padding(int height) const;
+	void print_leafkeys(AttrType attrType,Node** cur_node,int start,int end) const;
+	void print_internalkeys(AttrType attrType,Node** cur_node,int index) const;
+	int compareEntry(AttrType attrType,const LeafEntry &pair1, const LeafEntry &pair2) const;
+	BTree* tree;
 
 protected:
 	IndexManager();
