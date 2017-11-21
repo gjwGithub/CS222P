@@ -13,12 +13,13 @@ IndexManager* IndexManager::instance()
 
 IndexManager::IndexManager()
 {
-	tree=NULL;
+	tree = NULL;
 }
 
 IndexManager::~IndexManager()
 {
-	delete tree;
+	if (this->tree)
+		delete tree;
 }
 
 RC IndexManager::createFile(const string &fileName)
@@ -226,11 +227,20 @@ RC IndexManager::refreshMetaData(IXFileHandle &ixfileHandle)
 
 RC IndexManager::closeFile(IXFileHandle &ixfileHandle)
 {
+	if (this->tree && this->tree->writeNodesBack(ixfileHandle) == -1)
+	{
+#ifdef DEBUG
+		cerr << "Cannot write the nodes back when closing file" << endl;
+#endif
+		return -1;
+	}
 	refreshMetaData(ixfileHandle);
 	if (ixfileHandle.writeMetaPage() == -1)
 		return -1;
 	if (PagedFileManager::instance()->closeFile(ixfileHandle.handle) == -1)
 		return -1;
+	if (this->tree)
+		delete this->tree;
 	return 0;
 }
 
@@ -241,8 +251,6 @@ RC IndexManager::insertEntry(IXFileHandle &ixfileHandle, const Attribute &attrib
 	if(tree == NULL) {
 		tree = new BTree();
 		tree->attrType = attribute.type;
-		cout<<"type"<<tree->attrType<<endl;
-		cout<<"finish tree"<<endl;
 	}
 	//ixfileHandle.readMetaPage();
 	if(ixfileHandle.root==-1){
@@ -261,13 +269,22 @@ RC IndexManager::deleteEntry(IXFileHandle &ixfileHandle, const Attribute &attrib
 	LeafEntry leafEntry(attribute.type, key, rid);
 	if (this->tree)
 	{
-		return this->tree->deleteEntry(ixfileHandle, leafEntry);
+		RC status = this->tree->deleteEntry(ixfileHandle, leafEntry);
+		free(leafEntry.key);
+		return status;
 	}
 	else
 	{
 		this->tree = new BTree();
 		tree->attrType = attribute.type;
 
+		if (ixfileHandle.root == NULLNODE)
+		{
+#ifdef DEBUG
+			cerr << "Cannot read the root node when deleting entry" << endl;
+#endif
+			return -1;
+		}
 		char *rootPage = (char*)malloc(PAGE_SIZE);
 		ixfileHandle.readPage(ixfileHandle.root, rootPage);
 		this->tree->root = this->tree->generateNode(rootPage);
@@ -289,8 +306,11 @@ RC IndexManager::deleteEntry(IXFileHandle &ixfileHandle, const Attribute &attrib
 			this->tree->nodeMap.insert(make_pair(ixfileHandle.smallestLeaf, this->tree->smallestLeaf));
 		}
 
-		return this->tree->deleteEntry(ixfileHandle, leafEntry);
+		RC status = this->tree->deleteEntry(ixfileHandle, leafEntry);
+		free(leafEntry.key);
+		return status;
 	}
+	free(leafEntry.key);
 	return 0;
 }
 
@@ -320,7 +340,7 @@ int IndexManager::compareKey(AttrType attrType, const void* v1, const void* v2) 
 	}
 	else if (attrType == AttrType::TypeReal)
 	{
-		return *(float*)v1 - *(float*)v2;
+		return floor(*(float*)v1 - *(float*)v2);
 	}
 	else if (attrType == AttrType::TypeVarChar)
 	{
@@ -394,6 +414,12 @@ RC IndexManager::scan(IXFileHandle &ixfileHandle,
 #endif
 				return -1;
 			}
+			//If the root is NULL
+			if (result == NULL)
+			{
+				ix_ScanIterator.end = true;
+				return 0;
+			}
 			bool foundKey = false;
 			while (!foundKey)
 			{
@@ -405,6 +431,8 @@ RC IndexManager::scan(IXFileHandle &ixfileHandle,
 						{
 							foundKey = true;
 							ix_ScanIterator.previousIndex = i - 1;
+							if (i - 1 >= 0)
+								ix_ScanIterator.previousRID = (*result)->leafEntries[i - 1].rid;
 							ix_ScanIterator.currentNode = result;
 							break;
 						}
@@ -415,6 +443,8 @@ RC IndexManager::scan(IXFileHandle &ixfileHandle,
 						{
 							foundKey = true;
 							ix_ScanIterator.previousIndex = i - 1;
+							if (i - 1 >= 0)
+								ix_ScanIterator.previousRID = (*result)->leafEntries[i - 1].rid;
 							ix_ScanIterator.currentNode = result;
 							break;
 						}
@@ -455,6 +485,7 @@ RC IndexManager::scan(IXFileHandle &ixfileHandle,
 		return -1;
 	}
 }
+
 void IndexManager::printBtree(IXFileHandle &ixfileHandle, const Attribute &attribute) const {
 	// if(tree==NULL){
 	// 	tree=new BTree();
@@ -482,9 +513,10 @@ void IndexManager::printBtree(IXFileHandle &ixfileHandle, const Attribute &attri
 void IndexManager::BSF(IXFileHandle &ixfileHandle,Node** cur_node,const Attribute& attribute,int height) const{
 
 	if ((*cur_node)->isLoaded == false){
-		void* data = malloc(PAGE_SIZE);
+		/*void* data = malloc(PAGE_SIZE);
 		ixfileHandle.readPage((*cur_node)->pageNum, data);
-		cur_node = tree->generateNode((char *)data);
+		cur_node = tree->generateNode((char *)data);*/
+		tree->loadNode(ixfileHandle, cur_node);
 	}
 	padding(height);
 	cout<<"{";
@@ -555,16 +587,16 @@ void IndexManager::padding(int height) const{
 }
 void IndexManager::print_leafkeys(AttrType attrType,Node** cur_node,int start,int end) const{
 	cout<<'"';
-	if(attrType=TypeInt){
+	if(attrType==TypeInt){
 		int key1;
 		memcpy(&key1,(char *)(((LeafNode*)*cur_node)->leafEntries[start].key),4);
 		cout<<key1<<":[";
 	}else if(attrType==TypeVarChar){
 		int length;
 		memcpy(&length,((LeafNode*)*cur_node)->leafEntries[start].key,sizeof(int));
-		void* str=malloc(length+4);
-		memcpy((char *)str,((LeafNode*)*cur_node)->leafEntries[start].key,length+4);
-		cout<<str<<":[";
+		void* str=malloc(length);
+		memcpy((char *)str,(char *)((LeafNode*)*cur_node)->leafEntries[start].key+4,length);
+		cout<<(char *)str<<":[";
 	}else{
 		float key1;
 		memcpy(&key1,(char *)(((LeafNode*)*cur_node)->leafEntries[start].key),4);
@@ -589,9 +621,9 @@ void IndexManager::print_internalkeys(AttrType attrType,Node** cur_node,int inde
 	}else if(attrType==TypeVarChar){
 		int length;
 		memcpy(&length,((InternalNode*)*cur_node)->internalEntries[index].key,sizeof(int));
-		void* str=malloc(length+4);
-		memcpy((char *)str,((InternalNode*)*cur_node)->internalEntries[index].key,length+4);
-		cout<<str<<'"';
+		void* str=malloc(length);
+		memcpy((char *)str,(char *)((InternalNode*)*cur_node)->internalEntries[index].key+4,length);
+		cout<<(char *)str<<'"';
 	}else{
 		float key1;
 		memcpy(&key1,((InternalNode*)*cur_node)->internalEntries[index].key,sizeof(int));
@@ -656,7 +688,7 @@ int IX_ScanIterator::compareKey(const void* v1, const void* v2)
 	}
 	else if (this->attrType == AttrType::TypeReal)
 	{
-		return *(float*)v1 - *(float*)v2;
+		return floor(*(float*)v1 - *(float*)v2);
 	}
 	else if (this->attrType == AttrType::TypeVarChar)
 	{
@@ -666,6 +698,7 @@ int IX_ScanIterator::compareKey(const void* v1, const void* v2)
 		string s2((char*)v2 + sizeof(int), strLength2);
 		return s1.compare(s2);
 	}
+	return 0;
 }
 
 RC IX_ScanIterator::getNextEntry(RID &rid, void *key)
@@ -699,8 +732,9 @@ RC IX_ScanIterator::getNextEntry(RID &rid, void *key)
 				return IX_EOF;
 			}
 		}
+		//Fetch the entry to the result
 		rid = (*this->currentNode)->leafEntries[currentIndex].rid;
-		key = (*this->currentNode)->leafEntries[currentIndex].key;
+		memcpy(key, (*this->currentNode)->leafEntries[currentIndex].key, (*this->currentNode)->leafEntries[currentIndex].size);
 		//If the current key is the last key in leaf node
 		if (currentIndex == (*this->currentNode)->leafEntries.size() - 1)
 		{
@@ -765,6 +799,14 @@ RC IXFileHandle::collectCounterValues(unsigned &readPageCount, unsigned &writePa
 	return 0;
 }
 
+LeafEntry::LeafEntry()
+{
+	this->key = NULL;
+	rid.pageNum = -1;
+	rid.slotNum = -1;
+	this->size = 0;
+}
+
 LeafEntry::LeafEntry(const AttrType &attrType, const void* key, const RID rid)
 {
 	if (attrType == AttrType::TypeInt)
@@ -789,12 +831,15 @@ LeafEntry::LeafEntry(const AttrType &attrType, const void* key, const RID rid)
 	this->rid = rid;
 }
 
-LeafEntry::LeafEntry(const LeafEntry &entry)
+LeafEntry::~LeafEntry()
 {
-	this->key = malloc(entry.size);
-	memcpy(this->key, entry.key, entry.size);
-	this->size = entry.size;
-	this->rid = entry.rid;
+}
+
+InternalEntry::InternalEntry()
+{
+	this->key = NULL;
+	this->leftChild = NULL;
+	this->rightChild = NULL;
 }
 
 InternalEntry::InternalEntry(const AttrType &attribute, const void* key, Node** leftChild, Node** rightChild)
@@ -845,13 +890,8 @@ InternalEntry::InternalEntry(const AttrType &attrType, const void* key)
 	}
 }
 
-InternalEntry::InternalEntry(const InternalEntry &entry)
+InternalEntry::~InternalEntry()
 {
-	this->key = malloc(entry.size);
-	memcpy(this->key, entry.key, entry.size);
-	this->size = entry.size;
-	this->leftChild = entry.leftChild;
-	this->rightChild = entry.rightChild;
 }
 
 Node::Node()
@@ -859,7 +899,7 @@ Node::Node()
 	this->isDirty = false;
 	this->isLoaded = false;
 	this->nodeSize = 0;
-	this->nodeType = LeafNodeType;
+	this->nodeType = UnknownNodeType;
 	this->pageNum = -1;
 	this->parentPointer = NULL;
 }
@@ -890,8 +930,8 @@ InternalNode::InternalNode()
 
 InternalNode::~InternalNode()
 {
-	if (*this->parentPointer == NULL)
-		delete this->parentPointer;
+	for (auto&i : this->internalEntries)
+		free(i.key);
 }
 
 LeafNode::LeafNode()
@@ -908,12 +948,8 @@ LeafNode::LeafNode()
 
 LeafNode::~LeafNode()
 {
-	if (*this->parentPointer == NULL)
-		delete this->parentPointer;
-	if (*this->rightPointer == NULL)
-		delete this->rightPointer;
-	if (*this->overflowPointer == NULL)
-		delete this->overflowPointer;
+	for (auto&i : this->leafEntries)
+		free(i.key);
 }
 
 BTree::BTree()
@@ -927,535 +963,432 @@ BTree::~BTree()
 {
 	for (auto &item : this->nodeMap)
 	{
-		if (*item.second)
-			delete *item.second;
-		delete item.second;
+		if (item.second)
+		{
+			if (*item.second)
+				delete *item.second;
+			delete item.second;
+		}
 	}
 }
 
 RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
-	//if (root == NULL) {
-		//set node fields
-		// Node** new_node = new Node*;
-		// *new_node = new LeafNode();
-		// ((LeafNode*)*new_node)->leafEntries.push_back(pair);
-		// ((LeafNode*)*new_node)->nodeType = LeafNodeType;
-		int entry_length;
-		if (attrType == TypeVarChar) {
+	int entry_length;
 
-			int var_length;
-			memcpy(&var_length, (char *)pair.key, 4);
+	if (attrType == TypeVarChar) {
 
+		memcpy(&entry_length, (char *)pair.key, 4);
+
+	}
+	else {
+		entry_length = 12;
+
+	}
+
+	if (root == NULL) {  //insert into the first node in the new tree
+						 //set node fields
+		Node** new_node = new Node*;
+		*new_node = new LeafNode();
+		((LeafNode*)*new_node)->leafEntries.push_back(pair);
+		((LeafNode*)*new_node)->nodeType = LeafNodeType;
+		((LeafNode*)*new_node)->nodeSize += entry_length + sizeof(OffsetType);
+		((LeafNode*)*new_node)->isLoaded = true;
+
+		//set tree fields
+		root = new_node;
+		smallestLeaf = new_node;
+		void* new_page = generatePage(new_node);
+		ixfileHandle.appendPage(new_page);
+		free(new_page);
+		nodeMap.insert(make_pair(ixfileHandle.ixAppendPageCounter - 1, new_node));
+		((LeafNode*)*new_node)->pageNum = ixfileHandle.ixAppendPageCounter - 1;
+		//set meta fields
+		ixfileHandle.root = ixfileHandle.ixAppendPageCounter - 1;
+		ixfileHandle.smallestLeaf = ixfileHandle.ixAppendPageCounter - 1;
+		//ixfileHandle.writeMetaPage();
+	}
+	else {
+		Node** root_node;  // Initiat root node
+		unordered_map<PageNum, Node**>::iterator iter; //judge the curnode exist in the hashmap
+		iter = nodeMap.find(ixfileHandle.root);
+		if (iter != nodeMap.end()) {
+			root_node = iter->second;
 		}
 		else {
-			entry_length = 12;
-
+			void* data = malloc(PAGE_SIZE);
+			ixfileHandle.readPage(ixfileHandle.root, data);
+			root_node = generateNode((char *)data);
+			nodeMap.insert(make_pair(ixfileHandle.root, root_node));
+			free(data);
 		}
+		Node** tar_leafNode = findLeafnode(ixfileHandle, pair, root_node);     //find the inserted leaf node
+		if (((LeafNode*)*tar_leafNode)->isLoaded == false) {
+			/*void* data = malloc(PAGE_SIZE);
+			PageNum cur_pageNum = ((LeafNode*)*tar_leafNode)->pageNum;
+			ixfileHandle.readPage(cur_pageNum, data);
+			tar_leafNode = generateNode((char *)data);
+			nodeMap.insert(make_pair(cur_pageNum, tar_leafNode));
+			free(data);*/
+			loadNode(ixfileHandle, tar_leafNode);
+		}
+		//first insert the entry to the origin leafnode
+		auto iter_vector = ((LeafNode*)*tar_leafNode)->leafEntries.begin();   //find the right position in leafnode
+		int isadded = 0;
+		for (int i = 0; i < ((LeafNode*)*tar_leafNode)->leafEntries.size(); i++) {
+			if (compareEntry(pair, ((LeafNode*)*tar_leafNode)->leafEntries[i])<0) {
+				((LeafNode*)*tar_leafNode)->leafEntries.insert(iter_vector + i, pair);
+				isadded = 1;
+				break;
+			}
+		}
+		if (isadded == 0) {
+			((LeafNode*)*tar_leafNode)->leafEntries.push_back(pair);
+		}
+		((LeafNode*)*tar_leafNode)->nodeSize += entry_length + sizeof(OffsetType);
+		if (((LeafNode*)*tar_leafNode)->nodeSize <= PAGE_SIZE) {   //insert into node into space-enough node
+																   //write the updated origin leaf node into file
+			void* new_page = generatePage(tar_leafNode);
+			ixfileHandle.writePage(((LeafNode*)*tar_leafNode)->pageNum, new_page);
 
-		if (root == NULL) {  //insert into the first node in the new tree
-			//set node fields
-			//cout<<"create root"<<endl;
+			free(new_page);
+			return 0;
+		}
+		else {                                                        //split node;
 			Node** new_node = new Node*;
 			*new_node = new LeafNode();
-			((LeafNode*)*new_node)->leafEntries.push_back(pair);
-			((LeafNode*)*new_node)->nodeType = LeafNodeType;
-			((LeafNode*)*new_node)->nodeSize += entry_length + sizeof(OffsetType);
 			((LeafNode*)*new_node)->isLoaded = true;
-			//set tree fields
-			root = new_node;
-			smallestLeaf = new_node;
-			void* new_page = generatePage(new_node);
-			ixfileHandle.appendPage(new_page);
-			free(new_page);
-			//cout<<"pageNum:"<<ixfileHandle.handle.getNumberOfPages();
-			nodeMap.insert(make_pair(ixfileHandle.ixAppendPageCounter - 1, new_node));
-			((LeafNode*)*new_node)->pageNum = ixfileHandle.ixAppendPageCounter - 1;
-			//set meta fields
-			ixfileHandle.root = ixfileHandle.ixAppendPageCounter - 1;
-			//cout<<"root page"<<ixfileHandle.root<<endl;
-			ixfileHandle.smallestLeaf = ixfileHandle.ixAppendPageCounter - 1;
-			return 0;
-			//ixfileHandle.writeMetaPage();
-		}
-		else {
-			//cout<<"root exists"<<endl;
-			Node** root_node;  // Initiat root node
-			unordered_map<PageNum, Node**>::iterator iter; //judge the curnode exist in the hashmap
-			iter = nodeMap.find(ixfileHandle.root);
-			if (iter != nodeMap.end()) {
-				root_node = iter->second;
-			}
-			else {
-				void* data = malloc(PAGE_SIZE);
-				ixfileHandle.readPage(ixfileHandle.root, data);
-				root_node = generateNode((char *)data);
-				nodeMap.insert(make_pair(ixfileHandle.root, root_node));
-				free(data);
-			}
-			//cout<<"1"<<endl;
-			Node** tar_leafNode = findLeafnode(ixfileHandle, pair, root_node);     //find the inserted leaf node
-			//cout<<"pageNum"<<((LeafNode*)*tar_leafNode)->pageNum<<endl;
-			//cout<<"2"<<endl;
-			if (((LeafNode*)*tar_leafNode)->isLoaded == false) {
-				void* data = malloc(PAGE_SIZE);
-				PageNum cur_pageNum = ((LeafNode*)*tar_leafNode)->pageNum;
-				ixfileHandle.readPage(cur_pageNum, data);
-				tar_leafNode = generateNode((char *)data);
-				nodeMap.insert(make_pair(cur_pageNum, tar_leafNode));
-				free(data);
-			}
-			//cout<<"3"<<endl;
-			// for(int i=0;i<((LeafNode*)*tar_leafNode)->leafEntries.size();i++){
-			// 		cout<<"entry::"<<*(int *)(((LeafNode*)*tar_leafNode)->leafEntries[i].key)<<endl;
-			// }
 
-			//first insert the entry to the origin leafnode
-			vector<LeafEntry>::iterator iter_vector = ((LeafNode*)*tar_leafNode)->leafEntries.begin();   //find the right position in leafnode
-			// int length_char=*(int *)pair.key;
-			// char *key_char=(char *)malloc(length_char);
-			// memcpy(key_char,(char *)pair.key+4,length_char);
-			// cout<<"var_value:"<<*key_char<<endl;
-			// cout<<"var length"<<length_char<<endl;
-			int isadded = 0;
-			//cout<<*(int *)pair.key<<endl;
-			for (int i = 0; i < ((LeafNode*)*tar_leafNode)->leafEntries.size(); i++) {
-				//cout<<*(int *)(((LeafNode*)*tar_leafNode)->leafEntries[i].key)<<endl;
-				if (compareEntry(pair, ((LeafNode*)*tar_leafNode)->leafEntries[i])<0) {
-					// int length_char1=*(int *)((LeafNode*)*tar_leafNode)->leafEntries[i].key;
-					// char *key_char1=(char *)malloc(length_char1);
-					// memcpy(key_char1,(char *)((LeafNode*)*tar_leafNode)->leafEntries[i].key+4,length_char1);
-					// cout<<"less than:"<<*key_char1<<endl;
-					//cout<<"7"<<endl;
-					//cout<<"insert"<<*(int *)pair.key<<endl;
-					//cout<<" i"<<i<<endl;
-					//cout<<"before"<<*(int *)(((LeafNode*)*tar_leafNode)->leafEntries[i].key)<<endl;
-					((LeafNode*)*tar_leafNode)->leafEntries.insert(((LeafNode*)*tar_leafNode)->leafEntries.begin() + i, pair);
-					//cout<<"update:"<<*(int *)(((LeafNode*)*tar_leafNode)->leafEntries[i].key)<<endl;
-					//cout<<"update after:"<<*(int *)(((LeafNode*)*tar_leafNode)->leafEntries[i+1].key)<<endl;
-					isadded = 1;
-					break;
-				}
-			}
-			//cout<<"4"<<endl;
-			if (isadded == 0){
-				//cout<<"last:"<<endl;
-				((LeafNode*)*tar_leafNode)->leafEntries.push_back(pair);
-				//cout<<*(int *)(((LeafNode*)*tar_leafNode)->leafEntries.back().key)<<endl;
-			}
-			((LeafNode*)*tar_leafNode)->nodeSize += entry_length + sizeof(OffsetType);
-			//cout<<"size"<<((LeafNode*)*tar_leafNode)->nodeSize<<endl;
-			if (((LeafNode*)*tar_leafNode)->nodeSize <= PAGE_SIZE) {   //insert into node into space-enough node
-				//write the updated origin leaf node into file
-				void* new_page = generatePage(tar_leafNode);
-				ixfileHandle.writePage(((LeafNode*)*tar_leafNode)->pageNum, new_page);
-
-				// Node** node1=new Node*;
-				// void* data111 = malloc(PAGE_SIZE);
-				// ixfileHandle.readPage(((LeafNode*)*tar_leafNode)->pageNum, data111);
-				// node1 = generateNode((char *)data111);
-				// for(int i=0;i<((LeafNode*)*node1)->leafEntries.size();i++){
-				// 	cout<<"entry::"<<*(int *)(((LeafNode*)*node1)->leafEntries[i].key)<<endl;
-				// }
-				// free(data111);
-				free(new_page);
-				//cout<<"6"<<endl;
-				return 0;
-			}
-			else {                                                        //split node;
-				cout<<"123"<<endl;
-				Node** new_node = new Node*;
-				*new_node = new LeafNode();
-				((LeafNode*)*new_node)->isLoaded = true;
-				//move the origin leafnode the second half records to the new leafnode, and update the nodesize
-				for (int i = ((LeafNode*)*tar_leafNode)->leafEntries.size() / 2; i < ((LeafNode*)*tar_leafNode)->leafEntries.size(); i++) {
-					//cout<<"i:"<<*(int *)(((LeafNode*)*tar_leafNode)->leafEntries[i].key)<<endl;
-					((LeafNode*)*new_node)->leafEntries.push_back(((LeafNode*)*tar_leafNode)->leafEntries[i]);
-					int var_length;
-					if (attrType == TypeVarChar) {
-						memcpy(&var_length, (char *)((LeafNode*)*tar_leafNode)->leafEntries[i].key, 4);
-						var_length += 12;
-					}
-					else {
-						var_length = 12;
-					}
-					((LeafNode*)*tar_leafNode)->nodeSize -= var_length + sizeof(OffsetType);
-					((LeafNode*)*new_node)->nodeSize += var_length + sizeof(OffsetType);
-				}
-				cout<<"11"<<endl;
-				//the mid_node key's length
-				int mid_index = ((LeafNode*)*tar_leafNode)->leafEntries.size() / 2;
-				//cout<<"mid"<<mid_index<<endl;
+			//move the origin leafnode the second half records to the new leafnode, and update the nodesize
+			for (int i = ((LeafNode*)*tar_leafNode)->leafEntries.size() / 2; i < ((LeafNode*)*tar_leafNode)->leafEntries.size(); i++) {
+				((LeafNode*)*new_node)->leafEntries.push_back(((LeafNode*)*tar_leafNode)->leafEntries[i]);
 				int var_length;
-				void* key_mid;
 				if (attrType == TypeVarChar) {
-					memcpy(&var_length, (char *)((LeafNode*)*tar_leafNode)->leafEntries[mid_index].key, 4);
-					key_mid = malloc(sizeof(int) + var_length);
-					memcpy((char *)key_mid, (char *)((LeafNode*)*tar_leafNode)->leafEntries[mid_index].key, sizeof(int) + var_length);
+					memcpy(&var_length, (char *)((LeafNode*)*tar_leafNode)->leafEntries[i].key, 4);
+					var_length += 12;
+
 				}
 				else {
-					var_length = 4;
-					key_mid = malloc(sizeof(int));
-					memcpy((char *)key_mid, (char *)((LeafNode*)*tar_leafNode)->leafEntries[mid_index].key, sizeof(int));
+					var_length = 12;
 				}
-				free(key_mid);
-				cout<<"22"<<endl;
-					((LeafNode*)*tar_leafNode)->leafEntries.erase(((LeafNode*)*tar_leafNode)->leafEntries.begin() + mid_index,((LeafNode*)*tar_leafNode)->leafEntries.end());
-				//cout<<"44"<<endl;
-				if ((((LeafNode*)*tar_leafNode)->parentPointer) == NULL) {
-					//cout<<"                                    create new root                    "<<endl;
-					((LeafNode*)*new_node)->pageNum = ixfileHandle.ixAppendPageCounter + 1;  //assume the new leaf node will append in ixappendpageCounter th
-					InternalEntry internal_pair(attrType, ((LeafNode*)*new_node)->leafEntries[0].key, tar_leafNode, new_node);
+				((LeafNode*)*tar_leafNode)->nodeSize -= var_length + sizeof(OffsetType);
+				((LeafNode*)*new_node)->nodeSize += var_length + sizeof(OffsetType);
+			}
+			//the mid_node key's length
+			int mid_index = ((LeafNode*)*tar_leafNode)->leafEntries.size() / 2;
+			int var_length;
+			void* key_mid;
+			if (attrType == TypeVarChar) {
+				memcpy(&var_length, (char *)((LeafNode*)*tar_leafNode)->leafEntries[mid_index].key, 4);
+				key_mid = malloc(sizeof(int) + var_length);
+				memcpy((char *)key_mid, (char *)((LeafNode*)*tar_leafNode)->leafEntries[mid_index].key, sizeof(int) + var_length);
+			}
+			else {
+				var_length = 4;
+				key_mid = malloc(sizeof(int));
+				memcpy((char *)key_mid, (char *)((LeafNode*)*tar_leafNode)->leafEntries[mid_index].key, sizeof(int));
+			}
+			free(key_mid);
+			//delete the second half records from the origin leafnode.
+			//for (int i = mid_index; i < ((LeafNode*)*tar_leafNode)->leafEntries.size(); i++) {
+			((LeafNode*)*tar_leafNode)->leafEntries.erase(((LeafNode*)*tar_leafNode)->leafEntries.begin() + mid_index, ((LeafNode*)*tar_leafNode)->leafEntries.end());
+			//}
+			//update the origin and new node's rightpointer
+			// ((LeafNode*)*new_node)->rightPointer = ((LeafNode*)*tar_leafNode)->rightPointer;
+			// ((LeafNode*)*tar_leafNode)->rightPointer = new_node;
+			// ((LeafNode*)*new_node)->nodeType = LeafNodeType;
+			//if it dont have the parentNode,create a parentNode
+			if ((((LeafNode*)*tar_leafNode)->parentPointer) == NULL) {
+				((LeafNode*)*new_node)->pageNum = ixfileHandle.ixAppendPageCounter + 1;  //assume the new leaf node will append in ixappendpageCounter th
+				InternalEntry internal_pair(attrType, ((LeafNode*)*new_node)->leafEntries[0].key, tar_leafNode, new_node);
+				Node** new_parentNode = new Node*;
+				*new_parentNode = new InternalNode();
+				((InternalNode*)*new_parentNode)->isLoaded = true;
+				((InternalNode*)*new_parentNode)->internalEntries.push_back(internal_pair);
+				((InternalNode*)*new_parentNode)->nodeType = InternalNodeType;
+				((InternalNode*)*new_parentNode)->nodeSize += var_length + 2 * sizeof(int) + sizeof(OffsetType);
+				//write the father node to the file
+				void* new_page = generatePage(new_parentNode);
+				ixfileHandle.appendPage(new_page);
+				free(new_page);
+				nodeMap.insert(make_pair(ixfileHandle.ixAppendPageCounter - 1, new_parentNode));
+				((InternalNode*)*new_parentNode)->pageNum = ixfileHandle.ixAppendPageCounter - 1;
+
+
+				//update the origin and new node's rightpointer
+				((LeafNode*)*new_node)->rightPointer = ((LeafNode*)*tar_leafNode)->rightPointer;
+				((LeafNode*)*tar_leafNode)->rightPointer = new_node;
+				((LeafNode*)*new_node)->nodeType = LeafNodeType;
+				//set father-son relatoinship.
+				((LeafNode*)*tar_leafNode)->parentPointer = new_parentNode;
+				((LeafNode*)*new_node)->parentPointer = new_parentNode;
+				//set meta fields
+				ixfileHandle.root = ixfileHandle.ixAppendPageCounter - 1;
+				root = new_parentNode;
+				//ixfileHandle.writeMetaPage();
+				//update the origin leafnode to the file
+				void* new_originLeafpage = generatePage(tar_leafNode);
+				int originLeafpage = ((LeafNode*)*tar_leafNode)->pageNum;
+				ixfileHandle.writePage(originLeafpage, new_originLeafpage);
+				free(new_originLeafpage);
+				//add the updated leafnode to the file
+
+				void* new_newLeafpage = generatePage(new_node);
+				ixfileHandle.appendPage(new_newLeafpage);
+				nodeMap.insert(make_pair(ixfileHandle.ixAppendPageCounter - 1, new_node));
+				((LeafNode*)*new_node)->pageNum = ixfileHandle.ixAppendPageCounter - 1;
+				free(new_newLeafpage);
+				return 0;
+			}
+			else {  // it have the parentNode
+				Node** origin_parentNode = NULL;
+				PageNum origin_parentNode_pagenum = ((InternalNode*)*(((LeafNode*)*tar_leafNode)->parentPointer))->pageNum;
+				iter = nodeMap.find(origin_parentNode_pagenum);
+				if (iter != nodeMap.end()) {
+					origin_parentNode = iter->second;
+				}
+				else {
+					void* data3 = malloc(PAGE_SIZE);
+					ixfileHandle.readPage(origin_parentNode_pagenum, data3);
+					origin_parentNode = generateNode((char *)data3);
+					nodeMap.insert(make_pair(origin_parentNode_pagenum, origin_parentNode));
+					free(data3);
+				}
+
+				//update the origin and new node's rightpointer
+				((LeafNode*)*new_node)->rightPointer = ((LeafNode*)*tar_leafNode)->rightPointer;
+				((LeafNode*)*new_node)->pageNum = ixfileHandle.ixAppendPageCounter;
+				((LeafNode*)*tar_leafNode)->rightPointer = new_node;
+				((LeafNode*)*new_node)->nodeType = LeafNodeType;
+
+				//update the origin leafnode to the file
+				void* new_originLeafpage = generatePage(tar_leafNode);
+				int originLeafpage = ((LeafNode*)*tar_leafNode)->pageNum;
+				ixfileHandle.writePage(originLeafpage, new_originLeafpage);
+				free(new_originLeafpage);
+
+				//add the updated leafnode to the file
+				((LeafNode*)*new_node)->parentPointer = origin_parentNode;
+				void* new_newLeafpage = generatePage(new_node);
+				ixfileHandle.appendPage(new_newLeafpage);
+				nodeMap.insert(make_pair(ixfileHandle.ixAppendPageCounter - 1, new_node));
+				((LeafNode*)*new_node)->pageNum = ixfileHandle.ixAppendPageCounter - 1;
+				free(new_newLeafpage);
+
+				InternalEntry internal_pair(attrType, ((LeafNode*)*new_node)->leafEntries[0].key, tar_leafNode, new_node);
+				//add the entry into to internalnode
+				auto internal_iter_vector = ((InternalNode*)*origin_parentNode)->internalEntries.begin();   //find the right position in leafnode
+				int isadded1 = 0;
+				int added_index = 0;
+				for (int i = 0; i < ((InternalNode*)*origin_parentNode)->internalEntries.size(); i++) {
+					if (compareKey(internal_pair.key, ((InternalNode*)*origin_parentNode)->internalEntries[i].key)<0) {
+						((InternalNode*)*origin_parentNode)->internalEntries.insert(internal_iter_vector + i, internal_pair);
+						isadded1 = 1;
+						added_index = i;
+						break;
+					}
+				}
+				if (isadded1 == 0) {
+					((InternalNode*)*origin_parentNode)->internalEntries.push_back(internal_pair);
+					((InternalNode*)*origin_parentNode)->internalEntries[((InternalNode*)*origin_parentNode)->internalEntries.size() - 2].rightChild = internal_pair.leftChild;
+					((InternalNode*)*origin_parentNode)->nodeSize += var_length + sizeof(int) + sizeof(OffsetType);
+				}
+				else if (added_index == 0) {
+					((InternalNode*)*origin_parentNode)->internalEntries[1].leftChild = internal_pair.rightChild;
+					((InternalNode*)*origin_parentNode)->nodeSize += var_length + sizeof(int) + sizeof(OffsetType);
+				}
+				else {
+					((InternalNode*)*origin_parentNode)->internalEntries[added_index - 1].rightChild = internal_pair.leftChild;
+					((InternalNode*)*origin_parentNode)->internalEntries[added_index + 1].leftChild = internal_pair.rightChild;
+					((InternalNode*)*origin_parentNode)->nodeSize += var_length + sizeof(OffsetType);
+				}
+				//((InternalNode*)*origin_parentNode)->nodeSize += var_length + 2 * sizeof(int) + sizeof(OffsetType);
+				// if(((LeafNode*)*origin_parentNode)->nodeSize + var_length +2*sizeof(int)+sizeof(OffsetType)<=PAGE_SIZE){
+				// }else{ //split the parentNode
+
+				// }
+				//
+				if (((InternalNode*)*origin_parentNode)->nodeSize <= PAGE_SIZE) {
+					void* new_page = generatePage(tar_leafNode);
+					ixfileHandle.writePage(((InternalNode*)*origin_parentNode)->pageNum, new_page);
+					free(new_page);
+					return 0;
+				}
+				while (((InternalNode*)*origin_parentNode)->nodeSize > PAGE_SIZE) {
 					Node** new_parentNode = new Node*;
 					*new_parentNode = new InternalNode();
 					((InternalNode*)*new_parentNode)->isLoaded = true;
-					//cout<<"mid111"<<*(int *)(internal_pair.key)<<endl;
-					((InternalNode*)*new_parentNode)->internalEntries.push_back(internal_pair);
-					((InternalNode*)*new_parentNode)->nodeType = InternalNodeType;
-					((InternalNode*)*new_parentNode)->nodeSize += var_length + 2 * sizeof(int) + sizeof(OffsetType);
-					//write the father node to the file
-					cout<<"66"<<endl;
-					void* new_page = generatePage(new_parentNode);
-					ixfileHandle.appendPage(new_page);
-					//cout<<"pageNum:"<<ixfileHandle.handle.getNumberOfPages();
-					nodeMap.insert(make_pair(ixfileHandle.ixAppendPageCounter - 1, new_parentNode));
-					((InternalNode*)*new_parentNode)->pageNum = ixfileHandle.ixAppendPageCounter - 1;
-					free(new_page);
-					cout<<"77"<<endl;
-
-					//update the origin and new node's rightpointer
-					((LeafNode*)*new_node)->rightPointer = ((LeafNode*)*tar_leafNode)->rightPointer;
-					((LeafNode*)*tar_leafNode)->rightPointer = new_node;
-					((LeafNode*)*new_node)->nodeType = LeafNodeType;
-					//set father-son relatoinship.
-					((LeafNode*)*tar_leafNode)->parentPointer = new_parentNode;
-					((LeafNode*)*new_node)->parentPointer = new_parentNode;
-					//set meta fields
-					cout<<"88"<<endl;
-					ixfileHandle.root = ixfileHandle.ixAppendPageCounter - 1;
-					//cout<<"root page"<<ixfileHandle.root<<endl;
-					root=new_parentNode;
-					//ixfileHandle.writeMetaPage();
-					//cout<<"                                new root page                       "<<ixfileHandle.root<<endl;
-					//update the origin leafnode to the file
-					cout<<"99"<<endl;
-					void* new_originLeafpage = generatePage(tar_leafNode);
-					int originLeafpage = ((LeafNode*)*tar_leafNode)->pageNum;
-					ixfileHandle.writePage(originLeafpage, new_originLeafpage);
-					free(new_originLeafpage);
-					//add the updated leafnode to the file
-
-					void* new_newLeafpage = generatePage(new_node);
-					ixfileHandle.appendPage(new_newLeafpage);
-					//cout<<"pageNum:"<<ixfileHandle.handle.getNumberOfPages();
-					nodeMap.insert(make_pair(ixfileHandle.ixAppendPageCounter - 1, new_node));
-					((LeafNode*)*new_node)->pageNum = ixfileHandle.ixAppendPageCounter - 1;
-					free(new_newLeafpage);
-					return 0;
-				}
-				else {  // it have the parentNode
-					cout<<"000"<<endl;
-					Node** origin_parentNode = new Node*;
-					PageNum origin_parentNode_pagenum = (*(*tar_leafNode)->parentPointer)->pageNum;
-					//cout<<"parent page num"<<origin_parentNode_pagenum;
-					iter = nodeMap.find(origin_parentNode_pagenum);
-					if (iter != nodeMap.end()) {
-						origin_parentNode = iter->second;
-					}
-					else {
-						void* data3 = malloc(PAGE_SIZE);
-						ixfileHandle.readPage(origin_parentNode_pagenum, data3);
-						origin_parentNode = generateNode((char *)data3);
-						nodeMap.insert(make_pair(origin_parentNode_pagenum, origin_parentNode));
-						free(data3);
-					}
-					cout<<"111"<<endl;
-					//update the origin and new node's rightpointer
-					((LeafNode*)*new_node)->rightPointer = ((LeafNode*)*tar_leafNode)->rightPointer;
-					((LeafNode*)*new_node)->pageNum = ixfileHandle.ixAppendPageCounter;
-					((LeafNode*)*tar_leafNode)->rightPointer = new_node;
-					((LeafNode*)*new_node)->nodeType = LeafNodeType;
-
-					//update the origin leafnode to the file
-					cout<<"222"<<endl;
-					void* new_originLeafpage = generatePage(tar_leafNode);
-					int originLeafpage = ((LeafNode*)*tar_leafNode)->pageNum;
-					ixfileHandle.writePage(originLeafpage, new_originLeafpage);
-					free(new_originLeafpage);
-
-					//add the updated leafnode to the file
-					((LeafNode*)*new_node)->parentPointer = origin_parentNode;
-					void* new_newLeafpage = generatePage(new_node);
-					ixfileHandle.appendPage(new_newLeafpage);
-					nodeMap.insert(make_pair(ixfileHandle.ixAppendPageCounter - 1, new_node));
-					((LeafNode*)*new_node)->pageNum = ixfileHandle.ixAppendPageCounter - 1;
-					free(new_newLeafpage);
-
-					InternalEntry internal_pair(attrType, ((LeafNode*)*new_node)->leafEntries[0].key, tar_leafNode, new_node);
-					//cout<<"mid key111111111111:"<<*(int *)(((LeafNode*)*new_node)->leafEntries[0].key)<<endl;
-					//cout<<"internal_pair"<<*(int *)(internal_pair.key)<<endl;
-					//add the entry into to internalnode
-					vector<InternalEntry>::iterator internal_iter_vector = ((InternalNode*)*origin_parentNode)->internalEntries.begin();   //find the right position in leafnode
-					int isadded1 = 0;
-					int added_index = 0;
-					cout<<"sadasd"<<endl;
-					for (int i = 0; i < ((InternalNode*)*origin_parentNode)->internalEntries.size(); i++) {
-						//cout<<"parent node i key"<<*(int *)(((InternalNode*)*origin_parentNode)->internalEntries[i].key)<<endl;
-						if (compareKey(internal_pair.key, ((InternalNode*)*origin_parentNode)->internalEntries[i].key)<0) {
-							((InternalNode*)*origin_parentNode)->internalEntries.insert(internal_iter_vector + i, internal_pair);
-							isadded1 = 1;
-							added_index = i;
-							//cout<<"less"<<endl;
-							break;
-						}
-					}
-					cout<<"qqqqqq"<<endl;
-					if (isadded1 == 0) {
-						//cout<<"q2"<<endl;
-						((InternalNode*)*origin_parentNode)->internalEntries.push_back(internal_pair);
-						//cout<<"internal_pair"<<*(int *)(internal_pair.key)<<endl;
-						//cout<<"key"<<*(int *)(((InternalNode*)*origin_parentNode)->internalEntries[((InternalNode*)*origin_parentNode)->internalEntries.size()-1].key)<<endl;
-						((InternalNode*)*origin_parentNode)->internalEntries[((InternalNode*)*origin_parentNode)->internalEntries.size() - 2].rightChild = internal_pair.leftChild;
-						((InternalNode*)*origin_parentNode)->nodeSize += var_length + sizeof(int) + sizeof(OffsetType);
-					}
-					else if (added_index == 0) {
-						//cout<<"q3"<<endl;
-						((InternalNode*)*origin_parentNode)->internalEntries[1].leftChild = internal_pair.rightChild;
-						((InternalNode*)*origin_parentNode)->nodeSize += var_length + sizeof(int) + sizeof(OffsetType);
-						//cout<<"key"<<*(int *)(((InternalNode*)*origin_parentNode)->internalEntries[0].key)<<endl;
-					}
-					else {
-						//cout<<"q4"<<endl;
-						((InternalNode*)*origin_parentNode)->internalEntries[added_index - 1].rightChild = internal_pair.leftChild;
-						((InternalNode*)*origin_parentNode)->internalEntries[added_index + 1].leftChild = internal_pair.rightChild;
-						((InternalNode*)*origin_parentNode)->nodeSize += var_length + sizeof(OffsetType);
-						//cout<<"key"<<*(int *)(((InternalNode*)*origin_parentNode)->internalEntries[added_index].key)<<endl;
-					}
-					//((InternalNode*)*origin_parentNode)->nodeSize += var_length + 2 * sizeof(int) + sizeof(OffsetType);
-					//cout<<"parent node key"<<*(int *)(((InternalNode*)*origin_parentNode)->internalEntries[((InternalNode*)*origin_parentNode)->internalEntries.size()-1].key)<<endl;
-					// if(((LeafNode*)*origin_parentNode)->nodeSize + var_length +2*sizeof(int)+sizeof(OffsetType)<=PAGE_SIZE){
-					// }else{ //split the parentNode
-
-					// }
-					//
-					if (((InternalNode*)*origin_parentNode)->nodeSize <= PAGE_SIZE) {
-						cout<<"q5"<<endl;
-						void* new_page = generatePage(tar_leafNode);
-						ixfileHandle.writePage(((InternalNode*)*origin_parentNode)->pageNum, new_page);
-						free(new_page);
-						return 0;
-					}
-					while (((InternalNode*)*origin_parentNode)->nodeSize > PAGE_SIZE) {
-						//cout<<"a"<<endl;
-						Node** new_parentNode = new Node*;
-						*new_parentNode = new InternalNode();
-						((InternalNode*)*new_parentNode)->isLoaded = true;
-						((InternalNode*)*new_parentNode)->nodeSize +=sizeof(int);
-						//move the origin leafnode the second half records to the new leafnode, and update the nodesize
-						//cout<<"b"<<endl;
-						for (int i = ((InternalNode*)*origin_parentNode)->internalEntries.size() / 2 + 1; i < ((InternalNode*)*origin_parentNode)->internalEntries.size(); i++) {
-							((InternalNode*)*new_parentNode)->internalEntries.push_back(((InternalNode*)*origin_parentNode)->internalEntries[i]);
-							if (attrType == TypeVarChar) {
-								memcpy(&var_length, (char *)((InternalNode*)*origin_parentNode)->internalEntries[i].key, 4);
-								var_length += 12;
-							}
-							else {
-								var_length = 12;
-							}
-							((InternalNode*)*origin_parentNode)->nodeSize -= var_length + sizeof(OffsetType)+ sizeof(int);
-							((InternalNode*)*new_parentNode)->nodeSize += var_length + sizeof(OffsetType) + sizeof(int);
-						}
-						//the mid_node key's length
-						//cout<<"c"<<endl;
-						// for(int i=0;i<((InternalNode*)*origin_parentNode)->internalEntries.size();i++){
-						// 	cout<<"i internal key:"<<*(int *)((InternalNode*)*origin_parentNode)->internalEntries[i].key<<endl;
-						// }
-						// for(int i=0;i<((InternalNode*)*new_parentNode)->internalEntries.size();i++){
-						// 	cout<<"i internal new key:"<<*(int *)((InternalNode*)*new_parentNode)->internalEntries[i].key<<endl;
-						// }
-						int mid_index = ((InternalNode*)*origin_parentNode)->internalEntries.size() / 2;
-						void* key_mid;
+					((InternalNode*)*new_parentNode)->nodeSize += sizeof(int);
+					//move the origin leafnode the second half records to the new leafnode, and update the nodesize
+					for (int i = ((InternalNode*)*origin_parentNode)->internalEntries.size() / 2 + 1; i < ((InternalNode*)*origin_parentNode)->internalEntries.size(); i++) {
+						((InternalNode*)*new_parentNode)->internalEntries.push_back(((InternalNode*)*origin_parentNode)->internalEntries[i]);
 						if (attrType == TypeVarChar) {
-							memcpy(&var_length, (char *)((InternalNode*)*origin_parentNode)->internalEntries[mid_index].key, 4);
-							key_mid = malloc(sizeof(int) + var_length);
-							memcpy((char *)key_mid, (char *)((InternalNode*)*origin_parentNode)->internalEntries[mid_index].key, sizeof(int) + var_length);
+							memcpy(&var_length, (char *)((InternalNode*)*origin_parentNode)->internalEntries[i].key, 4);
+							var_length += 4;
 						}
 						else {
-							//cout<<"w"<<endl;
 							var_length = 4;
-							key_mid = malloc(sizeof(int));
-							memcpy((char *)key_mid, (char *)((InternalNode*)*origin_parentNode)->internalEntries[mid_index].key, sizeof(int));
-							//cout<<"mid key"<<*(int *)key_mid<<endl;
 						}
-						cout<<"qqqqq"<<*(int *)key_mid<<endl;
-						//delete the second half records from the origin leafnode.
-						//for (int i = mid_index; i < ((InternalNode*)*origin_parentNode)->internalEntries.size(); i++) {
-						//cout<<"d"<<endl;
-						((InternalNode*)*origin_parentNode)->internalEntries.erase(((InternalNode*)*origin_parentNode)->internalEntries.begin() + mid_index,((InternalNode*)*origin_parentNode)->internalEntries.end());
-						// for(int i=0;i<((InternalNode*)*origin_parentNode)->internalEntries.size();i++){
-						// 	cout<<"i updated internal key:"<<*(int *)((InternalNode*)*origin_parentNode)->internalEntries[i].key<<endl;
-						// }
-						//}
-						//update the origin and new node's rightpointer
-						((InternalNode*)*new_parentNode)->nodeType = InternalNodeType;
-						//cout<<"e"<<endl;
-						if ((((InternalNode*)*origin_parentNode)->parentPointer) == NULL) {
-							((InternalNode*)*new_parentNode)->pageNum = ixfileHandle.ixAppendPageCounter + 1;  //assume the new leaf node will append in ixappendpageCounter th
-							InternalEntry internal_pair1(attrType, key_mid, origin_parentNode, new_parentNode);
-							Node** new_grandparentNode = new Node*;
-							*new_grandparentNode = new InternalNode();
-							((InternalNode*)*new_grandparentNode)->isLoaded = true;
-							((InternalNode*)*new_grandparentNode)->internalEntries.push_back(internal_pair1);
-							cout<<"first root key:"<<*(int *)internal_pair1.key<<endl;
-							((InternalNode*)*new_grandparentNode)->nodeType = InternalNodeType;
-							((InternalNode*)*new_grandparentNode)->nodeSize += var_length + 2 * sizeof(int) + sizeof(OffsetType);
-							//write the father node to the file
-							//cout<<"f"<<endl;
-							void* new_page = generatePage(new_grandparentNode);
-							ixfileHandle.appendPage(new_page);
-							nodeMap.insert(make_pair(ixfileHandle.ixAppendPageCounter - 1, new_grandparentNode));
-							((InternalNode*)*new_grandparentNode)->pageNum = ixfileHandle.ixAppendPageCounter - 1;
-							free(new_page);
-							//set father-son relatoinship.
-							//cout<<"g"<<endl;
-							((InternalNode*)*origin_parentNode)->parentPointer = new_grandparentNode;
-							((InternalNode*)*new_parentNode)->parentPointer = new_grandparentNode;
-							//set meta fields
-							ixfileHandle.root = ixfileHandle.ixAppendPageCounter - 1;
-							//cout<<"root page"<<ixfileHandle.root<<endl;
-							root=new_grandparentNode;
-							//ixfileHandle.writeMetaPage();
-							//update the origin leafnode to the file
-							//cout<<"h"<<endl;
-							void* new_originLeafpage = generatePage(origin_parentNode);
-							int originLeafpage = ((InternalNode*)*origin_parentNode)->pageNum;
-							ixfileHandle.writePage(originLeafpage, new_originLeafpage);
-							free(new_originLeafpage);
-							//add the updated leafnode to the file
-							//cout<<"i"<<endl;
-							void* new_newLeafpage = generatePage(new_parentNode);
-							ixfileHandle.appendPage(new_newLeafpage);
-							nodeMap.insert(make_pair(ixfileHandle.ixAppendPageCounter - 1, new_parentNode));
-							((InternalNode*)*new_parentNode)->pageNum = ixfileHandle.ixAppendPageCounter - 1;
-							//update the new_parentNode entries's parentpointers
-							for(int i=0;i<((InternalNode*)*new_parentNode)->internalEntries.size();i++){
-								(*(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild))->parentPointer=new_parentNode;
-								void* datal=generatePage(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild);
-								int leftpage=(*(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild))->pageNum;
-								ixfileHandle.writePage(leftpage,datal);
-								free(datal);
-								(*(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild))->parentPointer=new_parentNode;
-								void* datar=generatePage(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild);
-								int rightpage=(*(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild))->pageNum;
-								ixfileHandle.writePage(rightpage,datar);
-								free(datar);
-							}
+						((InternalNode*)*origin_parentNode)->nodeSize -= var_length + sizeof(OffsetType) + sizeof(int);
+						((InternalNode*)*new_parentNode)->nodeSize += var_length + sizeof(OffsetType) + sizeof(int);
+					}
+					//the mid_node key's length
+					int mid_index = ((InternalNode*)*origin_parentNode)->internalEntries.size() / 2;
+					void* key_mid;
+					if (attrType == TypeVarChar) {
+						memcpy(&var_length, (char *)((InternalNode*)*origin_parentNode)->internalEntries[mid_index].key, 4);
+						key_mid = malloc(sizeof(int) + var_length);
+						memcpy((char *)key_mid, (char *)((InternalNode*)*origin_parentNode)->internalEntries[mid_index].key, sizeof(int) + var_length);
+					}
+					else {
+						var_length = 4;
+						key_mid = malloc(sizeof(int));
+						memcpy((char *)key_mid, (char *)((InternalNode*)*origin_parentNode)->internalEntries[mid_index].key, sizeof(int));
+					}
+					//delete the second half records from the origin leafnode.
+					//for (int i = mid_index; i < ((InternalNode*)*origin_parentNode)->internalEntries.size(); i++) {
+					((InternalNode*)*origin_parentNode)->internalEntries.erase(((InternalNode*)*origin_parentNode)->internalEntries.begin() + mid_index, ((InternalNode*)*origin_parentNode)->internalEntries.end());
+					//}
+					//update the origin and new node's rightpointer
+					((InternalNode*)*new_parentNode)->nodeType = InternalNodeType;
+					if ((((InternalNode*)*origin_parentNode)->parentPointer) == NULL) {
+						((InternalNode*)*new_parentNode)->pageNum = ixfileHandle.ixAppendPageCounter + 1;  //assume the new leaf node will append in ixappendpageCounter th
+						InternalEntry internal_pair1(attrType, key_mid, origin_parentNode, new_parentNode);
+						Node** new_grandparentNode = new Node*;
+						*new_grandparentNode = new InternalNode();
+						((InternalNode*)*new_grandparentNode)->isLoaded = true;
+						((InternalNode*)*new_grandparentNode)->internalEntries.push_back(internal_pair1);
+						((InternalNode*)*new_grandparentNode)->nodeType = InternalNodeType;
+						((InternalNode*)*new_grandparentNode)->nodeSize += var_length + 2 * sizeof(int) + sizeof(OffsetType);
+						//write the father node to the file
+						void* new_page = generatePage(new_grandparentNode);
+						ixfileHandle.appendPage(new_page);
+						nodeMap.insert(make_pair(ixfileHandle.ixAppendPageCounter - 1, new_grandparentNode));
+						((InternalNode*)*new_grandparentNode)->pageNum = ixfileHandle.ixAppendPageCounter - 1;
+						free(new_page);
+						//set father-son relatoinship.
+						((InternalNode*)*origin_parentNode)->parentPointer = new_grandparentNode;
+						((InternalNode*)*new_parentNode)->parentPointer = new_grandparentNode;
+						//set meta fields
+						ixfileHandle.root = ixfileHandle.ixAppendPageCounter - 1;
+						root = new_grandparentNode;
+						//ixfileHandle.writeMetaPage();
+						//update the origin leafnode to the file
+						void* new_originLeafpage = generatePage(origin_parentNode);
+						int originLeafpage = ((InternalNode*)*origin_parentNode)->pageNum;
+						ixfileHandle.writePage(originLeafpage, new_originLeafpage);
+						free(new_originLeafpage);
+						//add the updated leafnode to the file
+						void* new_newLeafpage = generatePage(new_parentNode);
+						ixfileHandle.appendPage(new_newLeafpage);
+						nodeMap.insert(make_pair(ixfileHandle.ixAppendPageCounter - 1, new_parentNode));
+						((InternalNode*)*new_parentNode)->pageNum = ixfileHandle.ixAppendPageCounter - 1;
+						//update the news;
+						for (int i = 0; i<((InternalNode*)*new_parentNode)->internalEntries.size(); i++) {
+							(*(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild))->parentPointer = new_parentNode;
+							void* datal = generatePage(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild);
+							int leftpage = (*(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild))->pageNum;
+							ixfileHandle.writePage(leftpage, datal);
+							free(datal);
+							(*(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild))->parentPointer = new_parentNode;
+							void* datar = generatePage(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild);
+							int rightpage = (*(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild))->pageNum;
+							ixfileHandle.writePage(rightpage, datar);
+							free(datar);
+						}
 
-							free(key_mid);
-							free(new_newLeafpage);
+						free(new_newLeafpage);
+						free(key_mid);
+						return 0;
+					}
+					else {  // it have the parentNode
+						Node** origin_grandparentNode = NULL;
+						PageNum origin_grandparentNode_pagenum = ((InternalNode*)*(((InternalNode*)*origin_parentNode)->parentPointer))->pageNum;
+						iter = nodeMap.find(origin_grandparentNode_pagenum);
+						if (iter != nodeMap.end()) {
+							origin_grandparentNode = iter->second;
+						}
+						else {
+							void* data2 = malloc(PAGE_SIZE);
+							ixfileHandle.readPage(origin_grandparentNode_pagenum, data2);
+							origin_grandparentNode = generateNode((char *)data2);
+							free(data2);
+						}
+
+						//update the origin leafnode to the file
+						void* new_originLeafpage = generatePage(origin_parentNode);
+						int originLeafpage = ((InternalNode*)*origin_parentNode)->pageNum;
+						ixfileHandle.writePage(originLeafpage, new_originLeafpage);
+						free(new_originLeafpage);
+						//add the updated leafnode to the file
+						((InternalNode*)*new_parentNode)->parentPointer = origin_grandparentNode;
+						void* new_newLeafpage = generatePage(new_parentNode);
+						ixfileHandle.appendPage(new_newLeafpage);
+						nodeMap.insert(make_pair(ixfileHandle.ixAppendPageCounter - 1, new_parentNode));
+						((InternalNode*)*new_parentNode)->pageNum = ixfileHandle.ixAppendPageCounter - 1;
+						free(new_newLeafpage);
+						//update the new parent entry's parentpointer
+						for (int i = 0; i<((InternalNode*)*new_parentNode)->internalEntries.size(); i++) {
+							(*(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild))->parentPointer = new_parentNode;
+							void* datal = generatePage(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild);
+							int leftpage = (*(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild))->pageNum;
+							ixfileHandle.writePage(leftpage, datal);
+							free(datal);
+							(*(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild))->parentPointer = new_parentNode;
+							void* datar = generatePage(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild);
+							int rightpage = (*(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild))->pageNum;
+							ixfileHandle.writePage(rightpage, datar);
+							free(datar);
+						}
+
+
+						InternalEntry internal_pair1(attrType, key_mid, origin_parentNode, new_parentNode);
+						free(key_mid);
+						//add the entry into to internalnode
+						auto internal_iter_vector = ((InternalNode*)*origin_grandparentNode)->internalEntries.begin();   //find the right position in leafnode
+						int isadded1 = 0;
+						int added_index = 0;
+						for (int i = 0; i < ((InternalNode*)*origin_grandparentNode)->internalEntries.size(); i++) {
+
+							if (compareKey(internal_pair1.key, ((InternalNode*)*origin_grandparentNode)->internalEntries[i].key)<0) {
+								((InternalNode*)*origin_grandparentNode)->internalEntries.insert(internal_iter_vector + i, internal_pair1);
+								isadded1 = 1;
+								added_index = i;
+								break;
+							}
+						}
+						if (isadded1 == 0) {
+							((InternalNode*)*origin_grandparentNode)->internalEntries.push_back(internal_pair1);
+							((InternalNode*)*origin_grandparentNode)->internalEntries[((InternalNode*)*origin_grandparentNode)->internalEntries.size() - 2].rightChild = internal_pair1.leftChild;
+							((InternalNode*)*origin_grandparentNode)->nodeSize += var_length + sizeof(int) + sizeof(OffsetType);
+						}
+						else if (added_index == 0) {
+							((InternalNode*)*origin_grandparentNode)->internalEntries[1].leftChild = internal_pair1.rightChild;
+							((InternalNode*)*origin_grandparentNode)->nodeSize += var_length + sizeof(int) + sizeof(OffsetType);
+						}
+						else {
+							((InternalNode*)*origin_grandparentNode)->internalEntries[added_index - 1].rightChild = internal_pair1.leftChild;
+							((InternalNode*)*origin_grandparentNode)->internalEntries[added_index + 1].leftChild = internal_pair1.rightChild;
+							((InternalNode*)*origin_grandparentNode)->nodeSize += var_length + sizeof(OffsetType);
+						}
+						//((InternalNode*)*origin_grandparentNode)->nodeSize += var_length + 2 * sizeof(int) + sizeof(OffsetType);
+						if (((InternalNode*)*origin_grandparentNode)->nodeSize <= PAGE_SIZE) {
+							void* new_page = generatePage(origin_grandparentNode);
+							ixfileHandle.writePage(((InternalNode*)*origin_grandparentNode)->pageNum, new_page);
+							free(new_page);
 							return 0;
 						}
-						else {  // it have the parentNode
-							//cout<<"j"<<endl;
-							Node** origin_grandparentNode = new Node*;
-							PageNum origin_grandparentNode_pagenum = (*(*origin_parentNode)->parentPointer)->pageNum;
-							iter = nodeMap.find(origin_grandparentNode_pagenum);
-							if (iter != nodeMap.end()) {
-								origin_grandparentNode = iter->second;
-							}
-							else {
-								void* data2=malloc(PAGE_SIZE);
-								ixfileHandle.readPage(origin_grandparentNode_pagenum,data2);
-							    origin_grandparentNode = generateNode((char *)data2);
-							    free(data2);
-							}
-
-							//update the origin leafnode to the file
-							//cout<<"k"<<endl;
-							void* new_originLeafpage = generatePage(origin_parentNode);
-							int originLeafpage = ((InternalNode*)*origin_parentNode)->pageNum;
-							ixfileHandle.writePage(originLeafpage, new_originLeafpage);
-							free(new_originLeafpage);
-							//add the updated leafnode to the file
-							//cout<<"m"<<endl;
-							((InternalNode*)*new_parentNode)->parentPointer = origin_grandparentNode;
-							void* new_newLeafpage = generatePage(new_parentNode);
-							ixfileHandle.appendPage(new_newLeafpage);
-							nodeMap.insert(make_pair(ixfileHandle.ixAppendPageCounter - 1, new_parentNode));
-							((InternalNode*)*new_parentNode)->pageNum = ixfileHandle.ixAppendPageCounter - 1;
-							free(new_newLeafpage);
-
-							//update the new_parentNode entries's parentpointers
-							for(int i=0;i<((InternalNode*)*new_parentNode)->internalEntries.size();i++){
-								(*(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild))->parentPointer=new_parentNode;
-								void* datal=generatePage(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild);
-								int leftpage=(*(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild))->pageNum;
-								ixfileHandle.writePage(leftpage,datal);
-								free(datal);
-								(*(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild))->parentPointer=new_parentNode;
-								void* datar=generatePage(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild);
-								int rightpage=(*(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild))->pageNum;
-								ixfileHandle.writePage(rightpage,datar);
-								free(datar);
-							}
-							//cout<<"n"<<endl;
-							InternalEntry internal_pair1(attrType, key_mid, origin_parentNode, new_parentNode);
-							//free(key_mid);
-							//add the entry into to internalnode
-							vector<InternalEntry>::iterator internal_iter_vector = ((InternalNode*)*origin_grandparentNode)->internalEntries.begin();   //find the right position in leafnode
-							int isadded1 = 0;
-							int added_index = 0;
-							//cout<<"l"<<endl;
-							//cout<<"internal pair"<<*(int *)internal_pair.key<<endl;
-							cout<<"key:"<<*(int *)internal_pair1.key<<endl;
-							for (int i = 0; i < ((InternalNode*)*origin_grandparentNode)->internalEntries.size(); i++) {
-								cout<<"i key:"<<*(int *)(((InternalNode*)*origin_grandparentNode)->internalEntries[i].key)<<endl;
-								if (compareKey(internal_pair1.key, ((InternalNode*)*origin_grandparentNode)->internalEntries[i].key)<0) {
-									((InternalNode*)*origin_grandparentNode)->internalEntries.insert(internal_iter_vector + i, internal_pair1);
-									isadded1 = 1;
-									added_index = i;
-									break;
-								}
-							}
-							//cout<<"q"<<endl;
-							if (isadded1 == 0) {
-								//cout<<"                                           push                "<<endl;
-								((InternalNode*)*origin_grandparentNode)->internalEntries.push_back(internal_pair1);
-								((InternalNode*)*origin_grandparentNode)->internalEntries[((InternalNode*)*origin_grandparentNode)->internalEntries.size() - 2].rightChild = internal_pair.leftChild;
-								((InternalNode*)*origin_grandparentNode)->nodeSize += var_length + sizeof(int) + sizeof(OffsetType);
-							}
-							else if (added_index == 0) {
-								//cout<<"                                           push first                "<<endl;
-								((InternalNode*)*origin_grandparentNode)->internalEntries[1].leftChild = internal_pair1.rightChild;
-								((InternalNode*)*origin_grandparentNode)->nodeSize += var_length + sizeof(int) + sizeof(OffsetType);
-							}
-							else {
-								//cout<<"                                            push inter                  "<<endl;
-								((InternalNode*)*origin_grandparentNode)->internalEntries[added_index - 1].rightChild = internal_pair1.leftChild;
-								((InternalNode*)*origin_grandparentNode)->internalEntries[added_index + 1].leftChild = internal_pair1.rightChild;
-								((InternalNode*)*origin_grandparentNode)->nodeSize += var_length + sizeof(OffsetType);
-							}
-							//cout<<"r"<<endl;
-							//((InternalNode*)*origin_grandparentNode)->nodeSize += var_length + 2 * sizeof(int) + sizeof(OffsetType);
-							if (((InternalNode*)*origin_grandparentNode)->nodeSize <= PAGE_SIZE) {
-								void* new_page = generatePage(origin_grandparentNode);
-								ixfileHandle.writePage(((InternalNode*)*origin_grandparentNode)->pageNum, new_page);
-								free(new_page);
-								//cout<<"s"<<endl;
-								return 0;
-							}
-							origin_parentNode = origin_grandparentNode;
-						}
-						//update the origin_parentNode, internal_pair,var_legnth,
+						origin_parentNode = origin_grandparentNode;
 					}
+					//update the origin_parentNode, internal_pair,var_legnth,
 				}
 			}
 		}
-		return 0;
+	}
+	return 0;
 }
 
 Node** BTree::findLeafnode(IXFileHandle &ixfileHandle, const LeafEntry &pair, Node** cur_node) {
 	while ((*cur_node)->nodeType != LeafNodeType) {
-		//cout<<"enter"<<endl;
 		int size = ((InternalNode*)*cur_node)->internalEntries.size();
 		if (attrType == TypeInt) {                    // key is int
 			//cout<<"enter int"<<endl;
@@ -1463,28 +1396,20 @@ Node** BTree::findLeafnode(IXFileHandle &ixfileHandle, const LeafEntry &pair, No
 			memcpy(&key, (char *)pair.key, sizeof(int));
 			for (int i = 0; i <= size; i++) {
 				if (i == size) {
-					//cout<<"enter int last"<<endl;
 					cur_node = ((InternalNode*)*cur_node)->internalEntries[size - 1].rightChild;
 					if (((InternalNode*)*cur_node)->isLoaded == false) {
-						void* data = malloc(PAGE_SIZE);
-						PageNum cur_pageNum = ((InternalNode*)*cur_node)->pageNum;
-						ixfileHandle.readPage(cur_pageNum, data);
-						cur_node = generateNode((char *)data);
-						nodeMap.insert(make_pair(cur_pageNum, cur_node));
+						loadNode(ixfileHandle, cur_node);
 					}
 					break;
 				}
 				else {
 					int sou_key;
 					memcpy(&sou_key, ((InternalNode*)*cur_node)->internalEntries[i].key, sizeof(int));
+	
 					if (key < sou_key) {
 						cur_node = ((InternalNode*)*cur_node)->internalEntries[i].leftChild;
 						if (((InternalNode*)*cur_node)->isLoaded == false) {
-							void* data = malloc(PAGE_SIZE);
-							PageNum cur_pageNum = ((InternalNode*)*cur_node)->pageNum;
-							ixfileHandle.readPage(cur_pageNum, data);
-							cur_node = generateNode((char *)data);
-							nodeMap.insert(make_pair(cur_pageNum, cur_node));
+							loadNode(ixfileHandle, cur_node);
 						}
 						break;
 					}
@@ -1498,26 +1423,17 @@ Node** BTree::findLeafnode(IXFileHandle &ixfileHandle, const LeafEntry &pair, No
 				if (i == size) {
 					cur_node = ((InternalNode*)*cur_node)->internalEntries[size - 1].rightChild;
 					if (((InternalNode*)*cur_node)->isLoaded == false) {
-						void* data = malloc(PAGE_SIZE);
-						PageNum cur_pageNum = ((InternalNode*)*cur_node)->pageNum;
-						ixfileHandle.readPage(cur_pageNum, data);
-						cur_node = generateNode((char *)data);
-						nodeMap.insert(make_pair(cur_pageNum, cur_node));
+						loadNode(ixfileHandle, cur_node);
 					}
 					break;
 				}
 				else {
 					float sou_key;
-					memcpy(&sou_key, ((InternalNode*)*cur_node)->internalEntries[i].key, sizeof(int));
+					memcpy(&sou_key, ((InternalNode*)*cur_node)->internalEntries[i].key, sizeof(float));
 					if (key < sou_key) {
-						//cout<<"enter i"<<i;
 						cur_node = ((InternalNode*)*cur_node)->internalEntries[i].leftChild;
 						if (((InternalNode*)*cur_node)->isLoaded == false) {
-							void* data = malloc(PAGE_SIZE);
-							PageNum cur_pageNum = ((InternalNode*)*cur_node)->pageNum;
-							ixfileHandle.readPage(cur_pageNum, data);
-							cur_node = generateNode((char *)data);
-							nodeMap.insert(make_pair(cur_pageNum, cur_node));
+							loadNode(ixfileHandle, cur_node);
 						}
 						break;
 					}
@@ -1529,11 +1445,7 @@ Node** BTree::findLeafnode(IXFileHandle &ixfileHandle, const LeafEntry &pair, No
 				if (i == size) {
 					cur_node = ((InternalNode*)*cur_node)->internalEntries[size - 1].rightChild;
 					if (((InternalNode*)*cur_node)->isLoaded == false) {
-						void* data = malloc(PAGE_SIZE);
-						PageNum cur_pageNum = ((InternalNode*)*cur_node)->pageNum;
-						ixfileHandle.readPage(cur_pageNum, data);
-						cur_node = generateNode((char *)data);
-						nodeMap.insert(make_pair(cur_pageNum, cur_node));
+						loadNode(ixfileHandle, cur_node);
 					}
 					break;
 				}
@@ -1541,11 +1453,7 @@ Node** BTree::findLeafnode(IXFileHandle &ixfileHandle, const LeafEntry &pair, No
 					if (compareKey(pair.key, ((InternalNode*)*cur_node)->internalEntries[i].key) < 0) {
 						cur_node = ((InternalNode*)*cur_node)->internalEntries[i].leftChild;
 						if (((InternalNode*)*cur_node)->isLoaded == false) {
-							void* data = malloc(PAGE_SIZE);
-							PageNum cur_pageNum = ((InternalNode*)*cur_node)->pageNum;
-							ixfileHandle.readPage(cur_pageNum, data);
-							cur_node = generateNode((char *)data);
-							nodeMap.insert(make_pair(cur_pageNum, cur_node));
+							loadNode(ixfileHandle, cur_node);
 						}
 						break;
 					}
@@ -1564,7 +1472,7 @@ int BTree::compareKey(void* v1, void* v2)
 	}
 	else if (this->attrType == AttrType::TypeReal)
 	{
-		return *(float*)v1 - *(float*)v2;
+		return floor(*(float*)v1 - *(float*)v2);
 	}
 	else if (this->attrType == AttrType::TypeVarChar)
 	{
@@ -1574,6 +1482,7 @@ int BTree::compareKey(void* v1, void* v2)
 		string s2((char*)v2 + sizeof(int), strLength2);
 		return s1.compare(s2);
 	}
+	return 0;
 }
 
 int BTree::compareEntry(const LeafEntry &pair1, const LeafEntry &pair2)
@@ -1691,6 +1600,10 @@ RC BTree::removeEntryFromNode(Node** node, const LeafEntry &pair)
 #endif
 		return -1;
 	}
+#ifdef DEBUG
+	cerr << "The node is UNKNOWN when removing entry from the node" << endl;
+#endif
+	return -1;
 }
 
 OffsetType BTree::getEntrySize(int nodeType, const LeafEntry &pair, bool isLastEntry)
@@ -1699,7 +1612,7 @@ OffsetType BTree::getEntrySize(int nodeType, const LeafEntry &pair, bool isLastE
 	{
 		OffsetType result = sizeof(PageNum); //size of left child page num
 		if (isLastEntry)
-			result += sizeof(PageNum);
+			result += sizeof(PageNum); //size of right child page num
 		if (this->attrType == AttrType::TypeInt)
 		{
 			result += sizeof(int);
@@ -1733,6 +1646,13 @@ OffsetType BTree::getEntrySize(int nodeType, const LeafEntry &pair, bool isLastE
 		}
 		return result;
 	}
+	else
+	{
+#ifdef DEBUG
+		cerr << "Unknown type of entry " << pair.rid.pageNum << ", " << pair.rid.slotNum << " when getting entry size" << endl;
+#endif
+		return 0;
+	}
 }
 
 //Returns the leaf containing the given key.
@@ -1747,7 +1667,8 @@ RC BTree::findLeaf(IXFileHandle &ixfileHandle, const LeafEntry &pair, LeafNode**
 #ifdef DEBUG
 		cerr << "The root pointer is NULL when finding the leaf" << endl;
 #endif
-		return -1;
+		result = NULL;
+		return 0;
 	}
 	if (*currentNode == NULL)
 	{
@@ -1766,14 +1687,16 @@ RC BTree::findLeaf(IXFileHandle &ixfileHandle, const LeafEntry &pair, LeafNode**
 			else
 				break;
 		}
-		if (((InternalNode*)*currentNode)->internalEntries[i].leftChild)
+		Node** child = NULL;
+		i != ((InternalNode*)*currentNode)->internalEntries.size() ? child = ((InternalNode*)*currentNode)->internalEntries[i].leftChild : child = ((InternalNode*)*currentNode)->internalEntries.back().rightChild;
+		if (child)
 		{
-			if (*((InternalNode*)*currentNode)->internalEntries[i].leftChild)
+			if (*child)
 			{
-				if (!(*((InternalNode*)*currentNode)->internalEntries[i].leftChild)->isLoaded)
+				if (!(*child)->isLoaded)
 				{
 					//If the node was not loaded before, we need to load it from page file
-					if (loadNode(ixfileHandle, ((InternalNode*)*currentNode)->internalEntries[i].leftChild) == -1)
+					if (loadNode(ixfileHandle, child) == -1)
 					{
 #ifdef DEBUG
 						cerr << "Cannot load the left child node when finding the leaf" << endl;
@@ -1786,12 +1709,12 @@ RC BTree::findLeaf(IXFileHandle &ixfileHandle, const LeafEntry &pair, LeafNode**
 					//Pretend that we read the leftchild node page
 					++ixfileHandle.ixReadPageCounter;
 				}
-				currentNode = ((InternalNode*)*currentNode)->internalEntries[i].leftChild;
+				currentNode = child;
 			}
 			else
 			{
 #ifdef DEBUG
-				cerr << "The leftchild points to a released memory when finding the leaf" << endl;
+				cerr << "The child points to a released memory when finding the leaf" << endl;
 #endif
 				return -1;
 			}
@@ -1799,7 +1722,7 @@ RC BTree::findLeaf(IXFileHandle &ixfileHandle, const LeafEntry &pair, LeafNode**
 		else
 		{
 #ifdef DEBUG
-			cerr << "The leftchild is null when finding the leaf" << endl;
+			cerr << "The child is null when finding the leaf" << endl;
 #endif
 			return -1;
 		}
@@ -1852,19 +1775,22 @@ RC BTree::adjustRoot(IXFileHandle &ixfileHandle)
 	{
 		// If it has a child, promote the first (only) child as the new root.
 		Node** temp = this->root;
-		this->nodeMap.erase((*this->root)->pageNum);
+		//this->nodeMap.erase((*this->root)->pageNum);
 		this->root = ((InternalNode*)*this->root)->internalEntries[0].rightChild;
 		(*this->root)->parentPointer = NULL;
 		ixfileHandle.root = (*this->root)->pageNum;
+
+		/*this->nodeMap.erase((*temp)->pageNum);
 		delete *temp;
-		delete temp;
+		*temp = NULL;*/
 	}
 	else
 	{
 		// If it is a leaf (has no children), then the whole tree is empty.
-		delete *this->root;
-		delete this->root;
+		/*this->nodeMap.erase((*this->root)->pageNum);
+		delete *this->root;*/
 		this->root = NULL;
+		ixfileHandle.root = NULLNODE;
 	}
 	return 0;
 }
@@ -1881,16 +1807,16 @@ RC BTree::getNeighborIndex(Node** node, int &result)
 		return -1;
 	}
 
-	size_t internalEntriesSize = ((InternalNode*)((*node)->parentPointer))->internalEntries.size();
+	size_t internalEntriesSize = ((InternalNode*)*((*node)->parentPointer))->internalEntries.size();
 	for (size_t i = 0; i < internalEntriesSize; i++)
 	{
-		if (*((InternalNode*)((*node)->parentPointer))->internalEntries[i].leftChild == *node)
+		if (*((InternalNode*)*((*node)->parentPointer))->internalEntries[i].leftChild == *node)
 		{
 			result = i - 1;
 			return 0;
 		}
 	}
-	if (*((InternalNode*)((*node)->parentPointer))->internalEntries[internalEntriesSize - 1].rightChild == *node)
+	if (*((InternalNode*)*((*node)->parentPointer))->internalEntries[internalEntriesSize - 1].rightChild == *node)
 	{
 		result = internalEntriesSize - 1;
 		return 0;
@@ -1912,6 +1838,7 @@ OffsetType BTree::getKeySize(const void* key)
 		int strLength = *(int*)key;
 		return sizeof(int) + strLength;
 	}
+	return 0;
 }
 
 RC BTree::getNodesMergeSize(Node** node1, Node** node2, OffsetType sizeOfParentKey, OffsetType &result)
@@ -1933,7 +1860,7 @@ RC BTree::getNodesMergeSize(Node** node1, Node** node2, OffsetType sizeOfParentK
 
 	if ((*node1)->nodeType == InternalNodeType && (*node2)->nodeType == InternalNodeType)
 	{
-		size_t node2EntriesSize = (*node1)->nodeSize;
+		size_t node2EntriesSize = (*node2)->nodeSize;
 		node2EntriesSize -= sizeof(MarkType) - sizeof(OffsetType) - sizeof(int); //Decrease size of nodeType, usedSpace, and parent pageNum
 		node2EntriesSize -= sizeof(int); //Derease size of a pointer in node2
 		node2EntriesSize -= sizeof(OffsetType); //Decrease size of slotCount in slot table
@@ -1943,7 +1870,7 @@ RC BTree::getNodesMergeSize(Node** node1, Node** node2, OffsetType sizeOfParentK
 	}
 	else if ((*node1)->nodeType == LeafNodeType && (*node2)->nodeType == LeafNodeType)
 	{
-		size_t node2EntriesSize = (*node1)->nodeSize;
+		size_t node2EntriesSize = (*node2)->nodeSize;
 		node2EntriesSize -= sizeof(MarkType) - sizeof(OffsetType) - sizeof(int) * 3; //Decrease size of nodeType, usedSpace, parent pageNum, right pageNum, and overflow PageNum
 		node2EntriesSize -= sizeof(OffsetType); //Decrease size of slotCount in slot table
 		result = (*node1)->nodeSize + node2EntriesSize;
@@ -2023,6 +1950,13 @@ RC BTree::mergeNodes(IXFileHandle &ixfileHandle, Node** node, Node** neighbor, i
 #endif
 		return -1;
 	}
+
+	//Update the leftchild pointer of the entry which after the middle entry
+	if (keyIndex < ((InternalNode*)*(*node)->parentPointer)->internalEntries.size() - 1)
+	{
+		((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex + 1].leftChild = neighbor;
+	}
+
 	RID dummyRid;
 	dummyRid.pageNum = -1;
 	dummyRid.slotNum = -1;
@@ -2036,9 +1970,10 @@ RC BTree::mergeNodes(IXFileHandle &ixfileHandle, Node** node, Node** neighbor, i
 	}
 
 	//Remove node from memory
-	this->nodeMap.erase((*node)->pageNum);
+	/*this->nodeMap.erase((*node)->pageNum);
 	delete *node;
-	*node = NULL;
+	*node = NULL;*/
+	(*node)->isLoaded = false;
 	return 0;
 }
 
@@ -2088,20 +2023,30 @@ RC BTree::redistributeNodes(Node** node, Node** neighbor, int neighborIndex, int
 			OffsetType sizeOfKeyInNeighbor = getKeySize(((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].key);
 			OffsetType finalNodeSize = (*node)->nodeSize + sizeOfKeyInNeighbor + sizeof(PageNum) + sizeof(OffsetType); //key + leftpointer + slotOffset
 			if (finalNodeSize > PAGE_SIZE)
+			{
+#ifdef DEBUG
+				cout << "The finalNodeSize = " << finalNodeSize << " is too large when redistributing InternalNode neighbor and node" << endl;
+#endif
 				return 0;
+			}
 
 			//Copy the rightmost key in the neighbor node and insert it in the front of node
 			//The value of the borrowed key is the middle key value
 			InternalEntry borrowedEntry(this->attrType, ((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].key);
 			borrowedEntry.leftChild = ((InternalNode*)*neighbor)->internalEntries.back().rightChild;
-			(*borrowedEntry.leftChild)->parentPointer = node;
 			borrowedEntry.rightChild = ((InternalNode*)*node)->internalEntries[0].leftChild;
+			(*borrowedEntry.leftChild)->parentPointer = node;
 
 			//If the entry that we decide to update in parent node is too big, we cannot and do not need to redistribute either
 			OffsetType sizeOfKeyInParent = getKeySize(((InternalNode*)*neighbor)->internalEntries.back().key);
 			OffsetType finalParentSize = ((InternalNode*)*(*node)->parentPointer)->nodeSize + sizeOfKeyInParent - getKeySize(((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].key);
 			if (finalParentSize > PAGE_SIZE)
+			{
+#ifdef DEBUG
+				cout << "The finalParentSize = " << finalParentSize << " is too large when redistributing InternalNode neighbor and node" << endl;
+#endif
 				return 0;
+			}
 
 			//Update the middle key value in the parent node into the value of rightmost key in the neighbor node
 			InternalEntry parentEntry(this->attrType, ((InternalNode*)*neighbor)->internalEntries.back().key);
@@ -2122,16 +2067,26 @@ RC BTree::redistributeNodes(Node** node, Node** neighbor, int neighborIndex, int
 			OffsetType sizeOfEntryInNeighbor = getEntrySize(LeafNodeType, borrowedEntry, false);
 			OffsetType finalNodeSize = (*node)->nodeSize + sizeOfEntryInNeighbor + sizeof(OffsetType); //key + leftpointer + slotOffset
 			if (finalNodeSize > PAGE_SIZE)
+			{
+#ifdef DEBUG
+				cout << "The finalNodeSize = " << finalNodeSize << " is too large when redistributing LeafNode neighbor and node" << endl;
+#endif
 				return 0;
+			}
 			
 			//If the entry that we decide to update in parent node is too big, we cannot and do not need to redistribute either
 			OffsetType sizeOfKeyInParent = getKeySize(((LeafNode*)*node)->leafEntries[0].key);
 			OffsetType finalParentSize = ((InternalNode*)*(*node)->parentPointer)->nodeSize + sizeOfKeyInParent - getKeySize(((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].key);
 			if (finalParentSize > PAGE_SIZE)
+			{
+#ifdef DEBUG
+				cout << "The finalParentSize = " << finalParentSize << " is too large when redistributing LeafNode neighbor and node" << endl;
+#endif
 				return 0;
+			}
 
 			//Update the middle key value in the parent node into the value of rightmost key in the neighbor node
-			InternalEntry parentEntry(this->attrType, ((LeafNode*)*node)->leafEntries[0].key);
+			InternalEntry parentEntry(this->attrType, ((LeafNode*)*neighbor)->leafEntries.back().key);
 			parentEntry.leftChild = ((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].leftChild;
 			parentEntry.rightChild = ((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].rightChild;
 
@@ -2159,20 +2114,30 @@ RC BTree::redistributeNodes(Node** node, Node** neighbor, int neighborIndex, int
 			OffsetType sizeOfKeyInNeighbor = getKeySize(((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].key);
 			OffsetType finalNodeSize = (*node)->nodeSize + sizeOfKeyInNeighbor + sizeof(PageNum) + sizeof(OffsetType); //key + leftpointer + slotOffset
 			if (finalNodeSize > PAGE_SIZE)
+			{
+#ifdef DEBUG
+				cout << "The finalNodeSize = " << finalNodeSize << " is too large when redistributing InternalNode node and neighbor" << endl;
+#endif
 				return 0;
+			}
 
-			//Copy the rightmost key in the neighbor node and insert it in the front of node
+			//Copy the leftmost key in the neighbor node and insert it in the end of node
 			//The value of the borrowed key is the middle key value
 			InternalEntry borrowedEntry(this->attrType, ((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].key);
 			borrowedEntry.leftChild = ((InternalNode*)*node)->internalEntries.back().rightChild;
-			(*borrowedEntry.rightChild)->parentPointer = node;
 			borrowedEntry.rightChild = ((InternalNode*)*neighbor)->internalEntries[0].leftChild;
+			(*borrowedEntry.rightChild)->parentPointer = node;
 
 			//If the entry that we decide to update in parent node is too big, we cannot and do not need to redistribute either
 			OffsetType sizeOfKeyInParent = getKeySize(((InternalNode*)*neighbor)->internalEntries[0].key);
 			OffsetType finalParentSize = ((InternalNode*)*(*node)->parentPointer)->nodeSize + sizeOfKeyInParent - getKeySize(((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].key);
 			if (finalParentSize > PAGE_SIZE)
+			{
+#ifdef DEBUG
+				cout << "The finalParentSize = " << finalParentSize << " is too large when redistributing InternalNode node and neighbor" << endl;
+#endif
 				return 0;
+			}
 
 			//Update the middle key value in the parent node into the value of leftmost key in the neighbor node
 			InternalEntry parentEntry(this->attrType, ((InternalNode*)*neighbor)->internalEntries[0].key);
@@ -2186,23 +2151,33 @@ RC BTree::redistributeNodes(Node** node, Node** neighbor, int neighborIndex, int
 		}
 		else if ((*node)->nodeType == LeafNodeType && (*neighbor)->nodeType == LeafNodeType)
 		{
-			//Copy the rightmost key in the neighbor node and insert it in the front of node
-			LeafEntry borrowedEntry(this->attrType, ((LeafNode*)*neighbor)->leafEntries[0].key, ((LeafNode*)*neighbor)->leafEntries.back().rid);
+			//Copy the leftmost key in the neighbor node and insert it in the back of node
+			LeafEntry borrowedEntry(this->attrType, ((LeafNode*)*neighbor)->leafEntries[0].key, ((LeafNode*)*neighbor)->leafEntries[0].rid);
 			
 			//If the entry that we decide to borrow from neighbor is too big, we cannot and do not need to redistribute either
 			OffsetType sizeOfEntryInNeighbor = getEntrySize(LeafNodeType, borrowedEntry, false);
 			OffsetType finalNodeSize = (*node)->nodeSize + sizeOfEntryInNeighbor + sizeof(OffsetType); //key + leftpointer + slotOffset
 			if (finalNodeSize > PAGE_SIZE)
+			{
+#ifdef DEBUG
+				cout << "The finalNodeSize = " << finalNodeSize << " is too large when redistributing LeafNode node and neighbor" << endl;
+#endif
 				return 0;
+			}
 
 			//If the entry that we decide to update in parent node is too big, we cannot and do not need to redistribute either
-			OffsetType sizeOfKeyInParent = getKeySize(((LeafNode*)*node)->leafEntries[0].key);
+			OffsetType sizeOfKeyInParent = getKeySize(((LeafNode*)*neighbor)->leafEntries[1].key);
 			OffsetType finalParentSize = ((InternalNode*)*(*node)->parentPointer)->nodeSize + sizeOfKeyInParent - getKeySize(((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].key);
 			if (finalParentSize > PAGE_SIZE)
+			{
+#ifdef DEBUG
+				cout << "The finalParentSize = " << finalParentSize << " is too large when redistributing LeafNode node and neighbor" << endl;
+#endif
 				return 0;
+			}
 
 			//Update the middle key value in the parent node into the value of leftmost key in the neighbor node
-			InternalEntry parentEntry(this->attrType, ((LeafNode*)*neighbor)->leafEntries[0].key);
+			InternalEntry parentEntry(this->attrType, ((LeafNode*)*neighbor)->leafEntries[1].key);
 			parentEntry.leftChild = ((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].leftChild;
 			parentEntry.rightChild = ((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].rightChild;
 
@@ -2219,6 +2194,7 @@ RC BTree::redistributeNodes(Node** node, Node** neighbor, int neighborIndex, int
 			return -1;
 		}
 	}
+
 	//Update node, neighbor node and parent node
 	(*node)->isDirty = true;
 	if (refreshNodeSize(node) == -1)
@@ -2228,6 +2204,7 @@ RC BTree::redistributeNodes(Node** node, Node** neighbor, int neighborIndex, int
 #endif
 		return -1;
 	}
+
 	(*neighbor)->isDirty = true;
 	if (refreshNodeSize(neighbor) == -1)
 	{
@@ -2236,6 +2213,7 @@ RC BTree::redistributeNodes(Node** node, Node** neighbor, int neighborIndex, int
 #endif
 		return -1;
 	}
+
 	(*(*node)->parentPointer)->isDirty = true;
 	if (refreshNodeSize((*node)->parentPointer) == -1)
 	{
@@ -2244,6 +2222,7 @@ RC BTree::redistributeNodes(Node** node, Node** neighbor, int neighborIndex, int
 #endif
 		return -1;
 	}
+
 	return 0;
 }
 
@@ -2257,9 +2236,9 @@ RC BTree::refreshNodeSize(Node** node)
 		return -1;
 	}
 
-	if ((*node)->nodeType = InternalNodeType)
+	if ((*node)->nodeType == InternalNodeType)
 	{
-		int size = sizeof(MarkType) + sizeof(OffsetType) + sizeof(PageNum); //type + usedspace + parent pointer
+		OffsetType size = sizeof(MarkType) + sizeof(OffsetType) + sizeof(PageNum); //type + usedspace + parent pointer
 		for (auto &i : ((InternalNode*)*node)->internalEntries)
 		{
 			size += sizeof(PageNum); //left page pointer
@@ -2270,15 +2249,14 @@ RC BTree::refreshNodeSize(Node** node)
 		size += sizeof(OffsetType); //slotCount
 		(*node)->nodeSize = size;
 	}
-	else if ((*node)->nodeType = LeafNodeType)
+	else if ((*node)->nodeType == LeafNodeType)
 	{
-		int size = sizeof(MarkType) + sizeof(OffsetType) + sizeof(PageNum) * 3; //type + usedspace + parent pointer + right pointer + overflow pointer
+		OffsetType size = sizeof(MarkType) + sizeof(OffsetType) + sizeof(PageNum) * 3; //type + usedspace + parent pointer + right pointer + overflow pointer
 		for (auto &i : ((LeafNode*)*node)->leafEntries)
 		{
-			size += sizeof(PageNum); //left page pointer
 			size += getKeySize(i.key); //key
+			size += sizeof(PageNum) + sizeof(unsigned); //Rid
 		}
-		size += sizeof(PageNum); //rightmost page pointer
 		size += ((LeafNode*)*node)->leafEntries.size() * sizeof(OffsetType); //slotOffsets
 		size += sizeof(OffsetType); //slotCount
 		(*node)->nodeSize = size;
@@ -2290,23 +2268,18 @@ RC BTree::writeNodesBack(IXFileHandle &ixfileHandle)
 {
 	for (auto &i : this->nodeMap)
 	{
-		if ((*i.second)->isDirty)
+		if (i.second && *i.second && (*i.second)->isDirty && (*i.second)->isLoaded)
 		{
-			if (*i.second == NULL)
-			{
-#ifdef DEBUG
-				cerr << "The node is NULL when writing back nodes" << endl;
-#endif
-				return -1;
-			}
 			char* pageData = generatePage(i.second);
 			if (ixfileHandle.writePage(i.first, pageData) == -1)
 			{
 #ifdef DEBUG
 				cerr << "Cannot write the node back, pageNum = " << (*i.second)->pageNum << endl;
 #endif
+				free(pageData);
 				return -1;
 			}
+			(*i.second)->isDirty = false;
 			free(pageData);
 		}
 	}
@@ -2357,7 +2330,7 @@ RC BTree::doDelete(IXFileHandle &ixfileHandle, Node** node, const LeafEntry &pai
 	Node** neighbor = neighborIndex == -1 ? ((InternalNode*)*(*node)->parentPointer)->internalEntries[0].rightChild : ((InternalNode*)*(*node)->parentPointer)->internalEntries[neighborIndex].leftChild;
 	int keySize = getKeySize(((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex].key);
 	OffsetType sizeOfMergeNodes;
-	if (getNodesMergeSize((Node**)node, neighbor, keySize, sizeOfMergeNodes) == -1)
+	if (getNodesMergeSize(node, neighbor, keySize, sizeOfMergeNodes) == -1)
 	{
 #ifdef DEBUG
 		cerr << "Cannot get size of the merged node when deleting entry, rid = " << pair.rid.pageNum << ", " << pair.rid.slotNum << endl;
@@ -2406,13 +2379,6 @@ RC BTree::deleteEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair)
 #endif
 		return -1;
 	}
-	if (writeNodesBack(ixfileHandle) == -1)
-	{
-#ifdef DEBUG
-		cerr << "Cannot write the node back when deleting entry, rid = " << pair.rid.pageNum << ", " << pair.rid.slotNum << endl;
-#endif
-		return -1;
-	}
 	return 0;
 }
 
@@ -2426,7 +2392,7 @@ char* BTree::generatePage(Node** node)
 		return NULL;
 	}
 
-	char* pageData = (char*)malloc(PAGE_SIZE);
+	char* pageData = (char*)calloc(PAGE_SIZE, 1);
 	OffsetType offset = 0;
 	memcpy(pageData + offset, &(*node)->nodeType, sizeof(MarkType));
 	offset += sizeof(MarkType);
@@ -2434,15 +2400,15 @@ char* BTree::generatePage(Node** node)
 	offset += sizeof(OffsetType);
 	if ((*node)->parentPointer && *(*node)->parentPointer)
 	{
-		PageNum parentPageNum = (*(*node)->parentPointer)->pageNum;
-		memcpy(pageData + offset, &parentPageNum, sizeof(PageNum));
-		offset += sizeof(PageNum);
+		int parentPageNum = (*(*node)->parentPointer)->pageNum;
+		memcpy(pageData + offset, &parentPageNum, sizeof(int));
+		offset += sizeof(int);
 	}
 	else
 	{
-		PageNum parentPageNum = NULLNODE;
-		memcpy(pageData + offset, &parentPageNum, sizeof(PageNum));
-		offset += sizeof(PageNum);
+		int parentPageNum = NULLNODE;
+		memcpy(pageData + offset, &parentPageNum, sizeof(int));
+		offset += sizeof(int);
 	}
 	if ((*node)->nodeType == InternalNodeType)
 	{
@@ -2451,9 +2417,9 @@ char* BTree::generatePage(Node** node)
 		for (OffsetType i = 0; i < slotCount; i++)
 		{
 			//If the slot is not the last slot, we only write its left child in page
-			PageNum leftChildPageNum = (*((const InternalNode*)*node)->internalEntries[i].leftChild)->pageNum;
-			memcpy(pageData + offset, &leftChildPageNum, sizeof(PageNum));
-			offset += sizeof(PageNum);
+			int leftChildPageNum = (*((const InternalNode*)*node)->internalEntries[i].leftChild)->pageNum;
+			memcpy(pageData + offset, &leftChildPageNum, sizeof(int));
+			offset += sizeof(int);
 			//Store slot offsets in slot table
 			memcpy(pageData + PAGE_SIZE - (i + 2) * sizeof(OffsetType), &offset, sizeof(OffsetType));
 			//Store key of slot
@@ -2476,9 +2442,9 @@ char* BTree::generatePage(Node** node)
 			//If the slot is the last slot, we will also write its right child in page
 			if (i == slotCount - 1)
 			{
-				PageNum rightChildPageNum = (*((const InternalNode*)*node)->internalEntries[i].rightChild)->pageNum;
-				memcpy(pageData + offset, &rightChildPageNum, sizeof(PageNum));
-				offset += sizeof(PageNum);
+				int rightChildPageNum = (*((const InternalNode*)*node)->internalEntries[i].rightChild)->pageNum;
+				memcpy(pageData + offset, &rightChildPageNum, sizeof(int));
+				offset += sizeof(int);
 			}
 		}
 	}
@@ -2487,28 +2453,28 @@ char* BTree::generatePage(Node** node)
 		//Store the pageNum of right pointer
 		if (((const LeafNode*)*node)->rightPointer && *((const LeafNode*)*node)->rightPointer)
 		{
-			PageNum rightPageNum = (*((const LeafNode*)*node)->rightPointer)->pageNum;
-			memcpy(pageData + offset, &rightPageNum, sizeof(PageNum));
-			offset += sizeof(PageNum);
+			int rightPageNum = (*((const LeafNode*)*node)->rightPointer)->pageNum;
+			memcpy(pageData + offset, &rightPageNum, sizeof(int));
+			offset += sizeof(int);
 		}
 		else
 		{
-			PageNum rightPageNum = NULLNODE;
-			memcpy(pageData + offset, &rightPageNum, sizeof(PageNum));
-			offset += sizeof(PageNum);
+			int rightPageNum = NULLNODE;
+			memcpy(pageData + offset, &rightPageNum, sizeof(int));
+			offset += sizeof(int);
 		}
 		//Store the pageNum of overflow pointer
 		if (((const LeafNode*)*node)->overflowPointer && *((const LeafNode*)*node)->overflowPointer)
 		{
-			PageNum overflowPageNum = (*((const LeafNode*)*node)->overflowPointer)->pageNum;
-			memcpy(pageData + offset, &overflowPageNum, sizeof(PageNum));
-			offset += sizeof(PageNum);
+			int overflowPageNum = (*((const LeafNode*)*node)->overflowPointer)->pageNum;
+			memcpy(pageData + offset, &overflowPageNum, sizeof(int));
+			offset += sizeof(int);
 		}
 		else
 		{
-			PageNum overflowPageNum = NULLNODE;
-			memcpy(pageData + offset, &overflowPageNum, sizeof(PageNum));
-			offset += sizeof(PageNum);
+			int overflowPageNum = NULLNODE;
+			memcpy(pageData + offset, &overflowPageNum, sizeof(int));
+			offset += sizeof(int);
 		}
 		
 		OffsetType slotCount = (OffsetType)((const LeafNode*)*node)->leafEntries.size();
@@ -2550,6 +2516,7 @@ char* BTree::generatePage(Node** node)
 	}
 	return pageData;
 }
+
 Node** BTree::generateNode(char* data)
 {
 	Node** result = new Node*;
@@ -2567,9 +2534,9 @@ Node** BTree::generateNode(char* data)
 		offset += sizeof(OffsetType);
 		(*result)->nodeSize = nodeSize;
 
-		PageNum parent;
-		memcpy(&parent, data + offset, sizeof(PageNum));
-		offset += sizeof(PageNum);
+		int parent;
+		memcpy(&parent, data + offset, sizeof(int));
+		offset += sizeof(int);
 		if (parent != NULLNODE)
 			(*result)->parentPointer = this->nodeMap[parent];
 		else
@@ -2598,8 +2565,8 @@ Node** BTree::generateNode(char* data)
 			}
 
 			//Generate left child pointer
-			OffsetType leftChildPointerOffset = slotOffset - sizeof(PageNum);
-			PageNum leftChildPageNum = *(PageNum*)(data + leftChildPointerOffset);
+			OffsetType leftChildPointerOffset = slotOffset - sizeof(int);
+			int leftChildPageNum = *(int*)(data + leftChildPointerOffset);
 
 			auto search = this->nodeMap.find(leftChildPageNum);
 			if (search != this->nodeMap.end())
@@ -2616,7 +2583,7 @@ Node** BTree::generateNode(char* data)
 
 			//Generate right child pointer
 			OffsetType rightChildPointerOffset = slotOffset + keyLength;
-			PageNum rightChildPageNum = *(PageNum*)(data + rightChildPointerOffset);
+			int rightChildPageNum = *(int*)(data + rightChildPointerOffset);
 			search = this->nodeMap.find(rightChildPageNum);
 			if (search != this->nodeMap.end())
 			{
@@ -2644,17 +2611,17 @@ Node** BTree::generateNode(char* data)
 		offset += sizeof(OffsetType);
 		(*result)->nodeSize = nodeSize;
 
-		PageNum parent;
-		memcpy(&parent, data + offset, sizeof(PageNum));
-		offset += sizeof(PageNum);
+		int parent;
+		memcpy(&parent, data + offset, sizeof(int));
+		offset += sizeof(int);
 		if (parent != NULLNODE)
 			(*result)->parentPointer = this->nodeMap[parent];
 		else
 			(*result)->parentPointer = NULL;
 
-		PageNum rightPageNum;
-		memcpy(&rightPageNum, data + offset, sizeof(PageNum));
-		offset += sizeof(PageNum);
+		int rightPageNum;
+		memcpy(&rightPageNum, data + offset, sizeof(int));
+		offset += sizeof(int);
 		if (rightPageNum != NULLNODE)
 		{
 			auto search = this->nodeMap.find(rightPageNum);
@@ -2673,9 +2640,9 @@ Node** BTree::generateNode(char* data)
 		else
 			((LeafNode*)*result)->rightPointer = NULL;
 
-		PageNum overflowPageNum;
-		memcpy(&overflowPageNum, data + offset, sizeof(PageNum));
-		offset += sizeof(PageNum);
+		int overflowPageNum;
+		memcpy(&overflowPageNum, data + offset, sizeof(int));
+		offset += sizeof(int);
 		if (overflowPageNum != NULLNODE)
 			((LeafNode*)*result)->overflowPointer = (LeafNode**)this->nodeMap[overflowPageNum];
 		else

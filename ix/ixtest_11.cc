@@ -50,6 +50,15 @@ int testCase_11(const string &indexFileName, const Attribute &attribute){
         }
     }
     cout<<"1234"<<endl;
+    cout << "leftchild: " << endl;
+    for (auto& i : ((InternalNode*)*indexManager->tree->root)->internalEntries)
+        cout << (int)(*i.leftChild)->nodeType << ": " << (*i.leftChild)->pageNum << " | ";
+    cout << endl;
+
+    cout << "rightchild: " << endl;
+    for (auto& i : ((InternalNode*)*indexManager->tree->root)->internalEntries)
+        cout << (int)(*i.rightChild)->nodeType << ": " << (*i.rightChild)->pageNum << " | ";
+    cout << endl;
     // scan
     rc = indexManager->scan(ixfileHandle, attribute, NULL, NULL, true, true, ix_ScanIterator);
     assert(rc == success && "indexManager::scan() should not fail.");
@@ -58,7 +67,7 @@ int testCase_11(const string &indexFileName, const Attribute &attribute){
     cerr << endl;
     while(ix_ScanIterator.getNextEntry(rid, &key) == success)
     {
-        cout<<key<<endl;
+        //cout<<key<<endl;
         if (rid.pageNum != key + 1 || rid.slotNum != key + 2) {
             cerr << "Wrong entries output... The test failed." << endl;
             rc = ix_ScanIterator.close();
@@ -69,7 +78,7 @@ int testCase_11(const string &indexFileName, const Attribute &attribute){
         if (outRecordNum % 200000 == 0) {
             cerr << outRecordNum << " scanned. " << endl;
         }
-        cout<<outRecordNum<<endl;
+        //cout<<outRecordNum<<endl;
     }
 
     // Inconsistency?
