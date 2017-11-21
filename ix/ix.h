@@ -4,6 +4,8 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <list>
+#include <cmath>
 
 #include "../rbf/rbfm.h"
 
@@ -133,7 +135,7 @@ class Node
 {
 public:
 	Node();
-	~Node();
+	virtual ~Node();
 
 	bool isOverflow();
 	bool isUnderflow();
@@ -153,22 +155,16 @@ public:
 	void* key;
 	RID rid;
 	OffsetType size;
+	int id;
+	static int sid;
 
-	LeafEntry()
-	{
-		this->key = NULL;
-		rid.pageNum = -1;
-		rid.slotNum = -1;
-	}
+	LeafEntry();
 
 	LeafEntry(const AttrType &attrType, const void* key, const RID rid);
 
-	~LeafEntry()
-	{
-		free(this->key);
-	}
+	~LeafEntry();
 
-	LeafEntry(const LeafEntry &entry);
+	//LeafEntry(const LeafEntry &entry);
 };
 
 
@@ -179,23 +175,15 @@ public:
 	Node** leftChild;
 	Node** rightChild;
 
-	InternalEntry()
-	{
-		this->key = NULL;
-		this->leftChild = NULL;
-		this->rightChild = NULL;
-	}
+	InternalEntry();
 
 	InternalEntry(const AttrType &attribute, const void* key, Node** leftChild, Node** rightChild);
 
-	~InternalEntry()
-	{
-		free(this->key);
-	}
+	~InternalEntry();
 
 	InternalEntry(const AttrType &attrType, const void* key);
 
-	InternalEntry(const InternalEntry &entry);
+	//InternalEntry(const InternalEntry &entry);
 
 private:
 	OffsetType size;
