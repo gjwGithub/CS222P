@@ -160,8 +160,8 @@ int main(){
     attrHeight.name = "Height";
     attrHeight.type = TypeReal;
 
-    remove("private_height_idx1");
-    remove("private_height_idx2");
+    indexManager->destroyFile("private_height_idx1");
+    indexManager->destroyFile("private_height_idx2");
 
     int rcmain = testCase_p1(indexHeightFileName1, indexHeightFileName2, attrHeight);
 

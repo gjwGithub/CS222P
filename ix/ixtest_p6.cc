@@ -111,7 +111,7 @@ int main()
     attrShortEmpName.name = "ShortEmpName";
     attrShortEmpName.type = TypeVarChar;
 
-    remove("private_empname_shortidx");
+    indexManager->destroyFile("private_empname_shortidx");
 
     RC result = testCase_p6(indexEmpNameFileName, attrShortEmpName);
     if (result == success) {

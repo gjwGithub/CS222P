@@ -210,8 +210,8 @@ int main(){
     attrAge.name = "Age";
     attrAge.type = TypeInt;
 
-    remove("private_age_idx1");
-    remove("private_age_idx2");
+    indexManager->destroyFile("private_age_idx1");
+    indexManager->destroyFile("private_age_idx2");
 
     int rcmain = testCase_p2(indexAgeFileName1, indexAgeFileName2, attrAge);
 

@@ -161,8 +161,8 @@ int main()
     attrLongEmpName.name = "LongEmpName";
     attrLongEmpName.type = TypeVarChar;
 
-    remove("private_empname_shortidx");
-    remove("private_empname_longidx");
+    indexManager->destroyFile("private_empname_shortidx");
+    indexManager->destroyFile("private_empname_longidx");
 
     int rcmain = testCase_p4(indexEmpNameFileName1, attrShortEmpName, indexEmpNameFileName2, attrLongEmpName);
     if (rcmain == success) {

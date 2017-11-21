@@ -137,7 +137,7 @@ int main()
     attrEmpName.name = "EmpName";
     attrEmpName.type = TypeVarChar;
 
-    remove("private_empname_idx");
+    indexManager->destroyFile("private_empname_idx");
 
     RC rcmain = testCase_p5(indexEmpNameFileName, attrEmpName);
     if (rcmain == success) {

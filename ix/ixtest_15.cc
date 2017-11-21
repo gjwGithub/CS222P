@@ -74,7 +74,7 @@ int main()
     attrAge.name = "age";
     attrAge.type = TypeInt;
 
-    remove("age_idx");
+    indexManager->destroyFile("age_idx");
 
     RC result = testCase_15(indexFileName, attrAge);
     if (result == success) {
