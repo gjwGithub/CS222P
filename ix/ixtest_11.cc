@@ -58,6 +58,7 @@ int testCase_11(const string &indexFileName, const Attribute &attribute){
     cerr << endl;
     while(ix_ScanIterator.getNextEntry(rid, &key) == success)
     {
+        cout<<key<<endl;
         if (rid.pageNum != key + 1 || rid.slotNum != key + 2) {
             cerr << "Wrong entries output... The test failed." << endl;
             rc = ix_ScanIterator.close();
@@ -68,6 +69,7 @@ int testCase_11(const string &indexFileName, const Attribute &attribute){
         if (outRecordNum % 200000 == 0) {
             cerr << outRecordNum << " scanned. " << endl;
         }
+        cout<<outRecordNum<<endl;
     }
 
     // Inconsistency?

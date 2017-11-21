@@ -44,15 +44,14 @@ int testCase_10(const string &indexFileName, const Attribute &attribute)
     {
         rid.pageNum = i + 1;
         rid.slotNum = i + 2;
-
+        cout<<"i:"<<i<<endl;
         rc = indexManager->insertEntry(ixfileHandle, attribute, &key1, rid);
+        cout<<"12345"<<endl;
         assert(rc == success && "indexManager::insertEntry() should not fail.");
-        cout<<"234"<<endl;
         inRidSlotNumSum += rid.slotNum;
         
         rid.pageNum = i + 101;
         rid.slotNum = i + 102;
-        cout<<"123"<<endl;
         rc = indexManager->insertEntry(ixfileHandle, attribute, &key2, rid);
         assert(rc == success && "indexManager::insertEntry() should not fail.");
     }

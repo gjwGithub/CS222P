@@ -57,7 +57,7 @@ int testCase_12(const string &indexFileName, const Attribute &attribute)
         rc = indexManager->insertEntry(ixfileHandle, attribute, &key, rid);
         assert(rc == success && "indexManager::insertEntry() should not fail.");
     }
-
+    cout<<"1234"<<endl;
     // scan - EXACT MATCH
     rc = indexManager->scan(ixfileHandle, attribute, &compVal, &compVal, true, true, ix_ScanIterator);
     assert(rc == success && "indexManager::scan() should not fail.");

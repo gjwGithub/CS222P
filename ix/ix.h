@@ -55,7 +55,7 @@ public:
 	// Print the B+ tree in pre-order (in a JSON record format)
 	void printBtree(IXFileHandle &ixfileHandle, const Attribute &attribute) const;
 
-	int compareKey(AttrType attrType, const void* v1, const void* v2);
+	int compareKey(AttrType attrType, const void* v1, const void* v2) const;
 	RC refreshMetaData(IXFileHandle &ixfileHandle);
 
 	void BSF(IXFileHandle &ixfileHandle,Node** cur_node,const Attribute& attribute,int height) const;
@@ -159,6 +159,7 @@ public:
 		this->key = NULL;
 		rid.pageNum = -1;
 		rid.slotNum = -1;
+
 	}
 
 	LeafEntry(const AttrType &attrType, const void* key, const RID rid);

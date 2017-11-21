@@ -65,7 +65,7 @@ int testCase_13(const string &indexFileName, const Attribute &attribute)
             numOfTuplesTobeScanned++;
         }
     }
-    
+    cout<<"122"<<endl;
     // insert more entries
     *(int *)key = tested_ascii;
     for (unsigned j = 0; j < tested_ascii; j++)
@@ -81,7 +81,7 @@ int testCase_13(const string &indexFileName, const Attribute &attribute)
         
         numOfTuplesTobeScanned++;
     }
-
+    cout<<"1234"<<endl;
     // collect counter
     // we will eyeball those numbers to see if they are reasonable.
     unsigned readPageCount = 0;

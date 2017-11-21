@@ -64,7 +64,7 @@ int testCase_14(const string &indexFileName,
             cerr << endl;
         }
     }
-
+    cout<<"1234"<<endl;
 
     // print BTree, by this time the BTree should have 3 level
     cerr << endl << endl << "////////////////////////////" << endl << endl;
