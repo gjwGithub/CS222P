@@ -213,7 +213,7 @@ int main()
     attrAge.name = "age";
     attrAge.type = TypeInt;
 
-    indexManager->destroyFile("age_idx");
+    remove("age_idx");
 
     RC result = testCase_11(indexFileName, attrAge);
     if (result == success) {

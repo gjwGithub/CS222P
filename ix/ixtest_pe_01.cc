@@ -139,7 +139,7 @@ int main()
     attrAge.name = "age";
     attrAge.type = TypeInt;
 
-    indexManager->destroyFile("private_extra_age_idx");
+    remove("private_extra_age_idx");
 
     RC result = testCase_extra_1(indexFileName, attrAge);
     if (result == success) {

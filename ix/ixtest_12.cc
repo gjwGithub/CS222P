@@ -120,7 +120,7 @@ int main()
     attrHeight.name = "height";
     attrHeight.type = TypeReal;
 
-    indexManager->destroyFile("height_idx");
+    remove("height_idx");
 
     RC result = testCase_12(indexFileName, attrHeight);
     if (result == success) {

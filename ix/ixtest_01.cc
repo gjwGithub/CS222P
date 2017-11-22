@@ -50,7 +50,7 @@ int main()
     indexManager = IndexManager::instance();
 
     const string indexFileName = "age_idx";
-    indexManager->destroyFile("age_idx");
+    remove("age_idx");
 
     RC rcmain = testCase_1(indexFileName);
     if (rcmain == success) {

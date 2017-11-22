@@ -95,7 +95,7 @@ int main()
     attrEmpName.name = "EmpName";
     attrEmpName.type = TypeVarChar;
 
-    indexManager->destroyFile("EmpName_idx");
+    remove("EmpName_idx");
 
     RC result = testCase_extra_2(indexEmpNameFileName, attrEmpName);
     if (result == success) {

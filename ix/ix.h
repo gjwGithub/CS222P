@@ -65,7 +65,6 @@ public:
 	void print_leafkeys(AttrType attrType,Node** cur_node,int start,int end) const;
 	void print_internalkeys(AttrType attrType,Node** cur_node,int index) const;
 	int compareEntry(AttrType attrType,const LeafEntry &pair1, const LeafEntry &pair2) const;
-	BTree* tree;
 
 protected:
 	IndexManager();
@@ -116,6 +115,7 @@ public:
 	int smallestLeaf;
 	FileHandle handle;
 	int root;
+	BTree* tree;
 	// Constructor
 	IXFileHandle();
 
