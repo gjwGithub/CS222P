@@ -18,7 +18,8 @@ RecordBasedFileManager::~RecordBasedFileManager()
 {
 }
 
-RC RecordBasedFileManager::createFile(const string &fileName) {
+RC RecordBasedFileManager::createFile(const string &fileName) 
+{
 	RC status = PagedFileManager::instance()->createFile(fileName);
 	if (status)
 	{
@@ -87,11 +88,13 @@ RC RecordBasedFileManager::createFile(const string &fileName) {
 	return 0;
 }
 
-RC RecordBasedFileManager::destroyFile(const string &fileName) {
+RC RecordBasedFileManager::destroyFile(const string &fileName) 
+{
     return PagedFileManager::instance()->destroyFile(fileName);
 }
 
-RC RecordBasedFileManager::openFile(const string &fileName, FileHandle &fileHandle) {
+RC RecordBasedFileManager::openFile(const string &fileName, FileHandle &fileHandle) 
+{
 	if (fileHandle.getFile())
 	{
 		int status = closeFile(fileHandle);
@@ -130,7 +133,8 @@ RC RecordBasedFileManager::openFile(const string &fileName, FileHandle &fileHand
 	return 0;
 }
 
-RC RecordBasedFileManager::closeFile(FileHandle &fileHandle) {
+RC RecordBasedFileManager::closeFile(FileHandle &fileHandle) 
+{
 	RC status = fileHandle.writeMetaData();
 	if (status == -1)
 	{
@@ -411,7 +415,8 @@ RC RecordBasedFileManager::insertRecord(FileHandle &fileHandle, const vector<Att
     return 0;
 }
 
-RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const vector<Attribute> &recordDescriptor, const RID &rid, void *data) {
+RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const vector<Attribute> &recordDescriptor, const RID &rid, void *data) 
+{
 	//Traverse tombstones and find real record page and slot
 	RID finalRid;
 	char* pageData;
@@ -514,7 +519,8 @@ RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const vector<Attri
 	return 0;
 }
 
-RC RecordBasedFileManager::printRecord(const vector<Attribute> &recordDescriptor, const void *data) {
+RC RecordBasedFileManager::printRecord(const vector<Attribute> &recordDescriptor, const void *data) 
+{
 	OffsetType offset = 0;
 	bool nullBit = false;
 	int nullFieldsIndicatorActualSize = ceil((double)recordDescriptor.size() / CHAR_BIT);

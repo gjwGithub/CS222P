@@ -120,16 +120,21 @@ RC RelationManager::createCatalog()
 	attr1.length = (AttrLength)4;
 	attrs1.push_back(attr1);
 
+	attr1.name = "hasIndex";
+	attr1.type = TypeInt;
+	attr1.length = (AttrLength)4;
+	attrs1.push_back(attr1);
+
 	fm_table->createFile("Columns");
 	fm_table->openFile("Columns", fh_table);
 
 	for (size_t i = 0; i < attrs.size(); i++) {
 		void *tuple1 = malloc(200);
-		int nullAttributesIndicatorActualSize1 = ceil((double)7 / CHAR_BIT);
+		int nullAttributesIndicatorActualSize1 = ceil((double)8 / CHAR_BIT);
 		unsigned char *nullsIndicator1 = (unsigned char *)malloc(nullAttributesIndicatorActualSize1);
 		memset(nullsIndicator1, 0, nullAttributesIndicatorActualSize1);
 		tupleSize = 0;
-		prepareTuple_cols(7, nullsIndicator1, 0, attrs[i].name.size(), attrs[i].name, attrs[i].type, attrs[i].length, i + 1, 0, 0, tuple1, &tupleSize);
+		prepareTuple_cols(8, nullsIndicator1, 0, attrs[i].name.size(), attrs[i].name, attrs[i].type, attrs[i].length, i + 1, 0, 0, 0, tuple1, &tupleSize);
 		fm_table->insertRecord(fh_table, attrs1, tuple1, rid);
 		free(tuple1);
 		free(nullsIndicator1);
@@ -137,11 +142,11 @@ RC RelationManager::createCatalog()
 
 	for (size_t i = 0; i < attrs1.size(); i++) {
 		void *tuple1 = malloc(200);
-		int nullAttributesIndicatorActualSize1 = ceil((double)7 / CHAR_BIT);
+		int nullAttributesIndicatorActualSize1 = ceil((double)8 / CHAR_BIT);
 		unsigned char *nullsIndicator1 = (unsigned char *)malloc(nullAttributesIndicatorActualSize1);
 		memset(nullsIndicator1, 0, nullAttributesIndicatorActualSize1);
 		tupleSize = 0;
-		prepareTuple_cols(7, nullsIndicator1, 1, attrs1[i].name.size(), attrs1[i].name, attrs1[i].type, attrs1[i].length, i + 1, 0, 0, tuple1, &tupleSize);
+		prepareTuple_cols(8, nullsIndicator1, 1, attrs1[i].name.size(), attrs1[i].name, attrs1[i].type, attrs1[i].length, i + 1, 0, 0, 0, tuple1, &tupleSize);
 		fm_table->insertRecord(fh_table, attrs1, tuple1, rid);
 		free(tuple1);
 		free(nullsIndicator1);
@@ -238,14 +243,19 @@ RC RelationManager::createTable(const string &tableName, const vector<Attribute>
 	attr1.length = (AttrLength)4;
 	attrs1.push_back(attr1);
 
+	attr1.name = "hasIndex";
+	attr1.type = TypeInt;
+	attr1.length = (AttrLength)4;
+	attrs1.push_back(attr1);
+
 	fm_table->openFile("Columns", fh_table);
 	for (size_t i = 0; i < attrs.size(); i++) {
 		void *tuple1 = malloc(200);
-		int nullAttributesIndicatorActualSize1 = ceil((double)7 / CHAR_BIT);
+		int nullAttributesIndicatorActualSize1 = ceil((double)8 / CHAR_BIT);
 		unsigned char *nullsIndicator1 = (unsigned char *)malloc(nullAttributesIndicatorActualSize1);
 		memset(nullsIndicator1, 0, nullAttributesIndicatorActualSize1);
 		tupleSize = 0;
-		prepareTuple_cols(7, nullsIndicator1, table_ID, attrs[i].name.size(), attrs[i].name, attrs[i].type, attrs[i].length, i + 1, 0, 0, tuple1, &tupleSize);
+		prepareTuple_cols(8, nullsIndicator1, table_ID, attrs[i].name.size(), attrs[i].name, attrs[i].type, attrs[i].length, i + 1, 0, 0, 0, tuple1, &tupleSize);
 		fm_table->insertRecord(fh_table, attrs1, tuple1, rid);
 		free(tuple1);
 		free(nullsIndicator1);
@@ -353,7 +363,7 @@ RC RelationManager::getAttributes(const string &tableName, vector<Attribute> &at
 	attribute1.push_back("column-type");
 	attribute1.push_back("column-length");
 	attribute1.push_back("endVersion");
-	int nullAttributesIndicatorActualSize = ceil((double)7 / CHAR_BIT);
+	int nullAttributesIndicatorActualSize = ceil((double)8 / CHAR_BIT);
 	void *data = malloc(4);
 	memcpy((char *)data, &tableID, 4);
 	scan("Columns", "table-id", EQ_OP, data, attribute1, rmsi);
@@ -414,7 +424,46 @@ RC RelationManager::insertTuple(const string &tableName, const void *data, RID &
 		fm_table->openFile(tableName, fh_table);
 	}
 	RC rel = fm_table->insertRecord(fh_table, attributes, data, rid);
-	return rel;
+	if (rel == -1)
+		return -1;
+
+	int offset = 0;
+	for (auto i : attributes)
+	{
+		if (hasIndex(tableName, i.name))
+		{
+			string indexFileName = getIndexName(tableName, i.name);
+			IXFileHandle ixfileHandle;
+			if (IndexManager::instance()->openFile(indexFileName, ixfileHandle) == -1)
+			{
+#ifdef DEBUG
+				cerr << "Cannot open the index file while inserting tuple" << endl;
+#endif
+				return -1;
+			}
+			if (IndexManager::instance()->insertEntry(ixfileHandle, i, (char*)data + offset, rid) == -1)
+			{
+#ifdef DEBUG
+				cerr << "Cannot insert entry while inserting tuple, RID = " << rid.pageNum << ", " << rid.slotNum << endl;
+#endif
+				return -1;
+			}
+			if (IndexManager::instance()->closeFile(ixfileHandle) == -1)
+			{
+#ifdef DEBUG
+				cerr << "Cannot close the index file while inserting tuple" << endl;
+#endif
+				return -1;
+			}
+		}
+		if (i.type == AttrType::TypeInt)
+			offset += sizeof(int);
+		else if (i.type == AttrType::TypeReal)
+			offset += sizeof(float);
+		else if (i.type == AttrType::TypeVarChar)
+			offset += sizeof(int) + *(int*)((char*)data + offset);
+	}
+	return 0;
 }
 
 RC RelationManager::deleteTuple(const string &tableName, const RID &rid)
@@ -430,8 +479,57 @@ RC RelationManager::deleteTuple(const string &tableName, const RID &rid)
 			fm_table->closeFile(fh_table);
 		fm_table->openFile(tableName, fh_table);
 	}
+
+	void* data = malloc(200);
+	if (readTuple(tableName, rid, data) == -1)
+	{
+#ifdef DEBUG
+		cerr << "Cannot read the tuple while deleting tuple" << endl;
+#endif
+		return -1;
+	}
+	int offset = 0;
+	for (auto i : attributes)
+	{
+		if (hasIndex(tableName, i.name))
+		{
+			string indexFileName = getIndexName(tableName, i.name);
+			IXFileHandle ixfileHandle;
+			if (IndexManager::instance()->openFile(indexFileName, ixfileHandle) == -1)
+			{
+#ifdef DEBUG
+				cerr << "Cannot open the index file while inserting tuple" << endl;
+#endif
+				return -1;
+			}
+			if (IndexManager::instance()->deleteEntry(ixfileHandle, i, (char*)data + offset, rid) == -1)
+			{
+#ifdef DEBUG
+				cerr << "Cannot insert entry while inserting tuple, RID = " << rid.pageNum << ", " << rid.slotNum << endl;
+#endif
+				return -1;
+			}
+			if (IndexManager::instance()->closeFile(ixfileHandle) == -1)
+			{
+#ifdef DEBUG
+				cerr << "Cannot close the index file while inserting tuple" << endl;
+#endif
+				return -1;
+			}
+		}
+		if (i.type == AttrType::TypeInt)
+			offset += sizeof(int);
+		else if (i.type == AttrType::TypeReal)
+			offset += sizeof(float);
+		else if (i.type == AttrType::TypeVarChar)
+			offset += sizeof(int) + *(int*)((char*)data + offset);
+	}
+	free(data);
+
 	RC rel = fm_table->deleteRecord(fh_table, attributes, rid);
-	return rel;
+	if (rel == -1)
+		return -1;
+	return 0;
 }
 
 RC RelationManager::updateTuple(const string &tableName, const void *data, const RID &rid)
@@ -624,6 +722,7 @@ RC RelationManager::dropAttribute(const string &tableName, const string &attribu
 	attribute1.push_back("column-position");
 	attribute1.push_back("startVersion");
 	attribute1.push_back("endVersion");
+	attribute1.push_back("hasIndex");
 	int nullAttributesIndicatorActualSize = ceil((double)6 / CHAR_BIT);
 	void *data = malloc(4);
 	memcpy((char *)data, &tableID, 4);
@@ -653,15 +752,18 @@ RC RelationManager::dropAttribute(const string &tableName, const string &attribu
 		int startVersion = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
 		offset += sizeof(int);
 		int endVersion = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		offset += sizeof(int);
+		int hasIndex = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		offset += sizeof(int);
 
 		if (stringfieldName != attributeName && endVersion == currentVersion - 1)
 		{
 			void *tuple = malloc(200);
-			int nullAttributesIndicatorActualSize2 = ceil((double)7 / CHAR_BIT);
+			int nullAttributesIndicatorActualSize2 = ceil((double)8 / CHAR_BIT);
 			unsigned char *nullsIndicator = (unsigned char *)malloc(nullAttributesIndicatorActualSize2);
 			memset(nullsIndicator, 0, nullAttributesIndicatorActualSize2);
 			int tupleSize = 0;
-			prepareTuple_cols(7, nullsIndicator, tableID, attr1.name.size(), attr1.name, attr1.type, attr1.length, columnID, startVersion, currentVersion, tuple, &tupleSize);
+			prepareTuple_cols(8, nullsIndicator, tableID, attr1.name.size(), attr1.name, attr1.type, attr1.length, columnID, startVersion, currentVersion, hasIndex, tuple, &tupleSize);
 
 			vector<Attribute> attributes;
 			RC rel1 = getAttributes("Columns", attributes);
@@ -745,6 +847,7 @@ RC RelationManager::addAttribute(const string &tableName, const Attribute &attr)
 	attribute1.push_back("column-position");
 	attribute1.push_back("startVersion");
 	attribute1.push_back("endVersion");
+	attribute1.push_back("hasIndex");
 	int nullAttributesIndicatorActualSize = ceil((double)6 / CHAR_BIT);
 	void *data = malloc(4);
 	memcpy((char *)data, &tableID, 4);
@@ -775,15 +878,18 @@ RC RelationManager::addAttribute(const string &tableName, const Attribute &attr)
 		int startVersion = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
 		offset += sizeof(int);
 		int endVersion = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		offset += sizeof(int);
+		int hasIndex = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		offset += sizeof(int);
 
 		if (endVersion == currentVersion - 1)
 		{
 			void *tuple = malloc(200);
-			int nullAttributesIndicatorActualSize2 = ceil((double)7 / CHAR_BIT);
+			int nullAttributesIndicatorActualSize2 = ceil((double)8 / CHAR_BIT);
 			unsigned char *nullsIndicator = (unsigned char *)malloc(nullAttributesIndicatorActualSize2);
 			memset(nullsIndicator, 0, nullAttributesIndicatorActualSize2);
 			int tupleSize = 0;
-			prepareTuple_cols(7, nullsIndicator, tableID, attr1.name.size(), attr1.name, attr1.type, attr1.length, columnID, startVersion, currentVersion, tuple, &tupleSize);
+			prepareTuple_cols(8, nullsIndicator, tableID, attr1.name.size(), attr1.name, attr1.type, attr1.length, columnID, startVersion, currentVersion, hasIndex, tuple, &tupleSize);
 
 			vector<Attribute> attributes;
 			RC rel1 = getAttributes("Columns", attributes);
@@ -809,11 +915,11 @@ RC RelationManager::addAttribute(const string &tableName, const Attribute &attr)
 	rmsi.close();
 
 	void *tuple = malloc(200);
-	int nullAttributesIndicatorActualSize2 = ceil((double)7 / CHAR_BIT);
+	int nullAttributesIndicatorActualSize2 = ceil((double)8 / CHAR_BIT);
 	unsigned char *nullsIndicator = (unsigned char *)malloc(nullAttributesIndicatorActualSize2);
 	memset(nullsIndicator, 0, nullAttributesIndicatorActualSize2);
 	int tupleSize = 0;
-	prepareTuple_cols(7, nullsIndicator, tableID, attr.name.size(), attr.name, attr.type, attr.length, fieldCount + 1, currentVersion, currentVersion, tuple, &tupleSize);
+	prepareTuple_cols(8, nullsIndicator, tableID, attr.name.size(), attr.name, attr.type, attr.length, fieldCount + 1, currentVersion, currentVersion, 0, tuple, &tupleSize);
 
 	vector<Attribute> attributes2;
 	RC rel1 = getAttributes("Columns", attributes2);
@@ -904,7 +1010,7 @@ void RelationManager::prepareTuple_tables(int attributeCount, unsigned char *nul
 	*tupleSize = offset;
 }
 
-void RelationManager::prepareTuple_cols(int attributeCount, unsigned char *nullAttributesIndicator, const int Table_ID, const int lengthOffield, const string &fieldName, const int fieldOfType, const int max_length, const int field_ID, const int startVersion, const int endVersion, void *buffer, int *tupleSize)
+void RelationManager::prepareTuple_cols(int attributeCount, unsigned char *nullAttributesIndicator, const int Table_ID, const int lengthOffield, const string &fieldName, const int fieldOfType, const int max_length, const int field_ID, const int startVersion, const int endVersion, const int hasIndex, void *buffer, int *tupleSize)
 {
 	int offset = 0;
 
@@ -972,6 +1078,12 @@ void RelationManager::prepareTuple_cols(int attributeCount, unsigned char *nullA
 	nullBit = nullAttributesIndicator[0] & (1 << 1);
 	if (!nullBit) {
 		memcpy((char *)buffer + offset, &endVersion, sizeof(int));
+		offset += sizeof(int);
+	}
+
+	nullBit = nullAttributesIndicator[0] & (1 << 0);
+	if (!nullBit) {
+		memcpy((char *)buffer + offset, &hasIndex, sizeof(int));
 		offset += sizeof(int);
 	}
 
@@ -1143,14 +1255,314 @@ vector<Attribute>* RelationManager::getVersionTable(const int version)
 	return &this->versionTable[version];
 }
 
+string RelationManager::getIndexName(const string &tableName, const string &attributeName)
+{
+	return tableName + attributeName + "Index";
+}
+
+int RelationManager::getTableID(const string &tableName)
+{
+	string attr = "table-id";
+	vector<string> attributes;
+	attributes.push_back(attr);
+	RM_ScanIterator rmsi;
+	int size = tableName.size();
+	void *data1 = malloc(size + 4);
+	memcpy((char *)data1, &size, 4);
+	memcpy((char *)data1 + 4, tableName.c_str(), size);
+	scan("Tables", "table-name", EQ_OP, data1, attributes, rmsi);
+	free(data1);
+	int nullAttributesIndicatorActualSize1 = ceil((double)4 / CHAR_BIT);
+	RID rid;
+	void *returnedData = malloc(200);
+	rmsi.getNextTuple(rid, returnedData);
+	int tableID = *(int *)((char *)returnedData + nullAttributesIndicatorActualSize1);
+	fm_table->closeFile(fh_table);
+	rmsi.close();
+	free(returnedData);
+	return tableID;
+}
+
+bool RelationManager::hasIndex(const string &tableName, const string &attributeName)
+{
+	string indexFileName = getIndexName(tableName, attributeName);
+	auto search = this->map_hasIndex.find(indexFileName);
+	if (search != this->map_hasIndex.end())
+		return search->second;
+	else
+	{
+		int tableID = getTableID(tableName);
+		Attribute keyAttribute;
+		vector<string> attribute1;
+		attribute1.push_back("column-name");
+		attribute1.push_back("hasIndex");
+		int nullAttributesIndicatorActualSize = ceil((double)2 / CHAR_BIT);
+		RM_ScanIterator rmsi;
+		RID rid;
+		scan("Columns", "table-id", EQ_OP, &tableID, attribute1, rmsi);
+		void* returnedData = malloc(200);
+		while (rmsi.getNextTuple(rid, returnedData) != RM_EOF)
+		{
+			int offset = 0;
+			int nameSize = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+			offset += sizeof(int);
+			char* fieldName = (char *)malloc(nameSize + 1);
+			memcpy(fieldName, (char *)returnedData + nullAttributesIndicatorActualSize + offset, nameSize);
+			fieldName[nameSize] = '\0';
+			offset += nameSize;
+			string stringfieldName = fieldName;
+			int hasIndex = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+			offset += sizeof(int);
+
+			if (stringfieldName == attributeName)
+			{
+				this->map_hasIndex[indexFileName] = hasIndex;
+				free(fieldName);
+				free(returnedData);
+				fm_table->closeFile(fh_table);
+				rmsi.close();
+				return hasIndex;
+			}
+			free(fieldName);
+		}
+		free(returnedData);
+		fm_table->closeFile(fh_table);
+		rmsi.close();
+	}
+	return false;
+}
+
 RC RelationManager::createIndex(const string &tableName, const string &attributeName)
 {
-	return -1;
+	//Create index file
+	string indexFileName = getIndexName(tableName, attributeName);
+	if (IndexManager::instance()->createFile(indexFileName) == -1)
+	{
+#ifdef DEBUG
+		cerr << "Cannot create the index file while creating index" << endl;
+#endif
+		return -1;
+	}
+	this->map_hasIndex[indexFileName] = true;
+
+	//Find the table ID
+	int tableID = getTableID(tableName);
+	//Change the value of hasIndex in Column table
+	int keyLength;
+	Attribute keyAttribute;
+	vector<string> attribute1;
+	attribute1.push_back("column-name");
+	attribute1.push_back("column-type");
+	attribute1.push_back("column-length");
+	attribute1.push_back("column-position");
+	attribute1.push_back("startVersion");
+	attribute1.push_back("endVersion");
+	attribute1.push_back("hasIndex");
+	int nullAttributesIndicatorActualSize = ceil((double)6 / CHAR_BIT);
+	void *data = malloc(4);
+	memcpy((char *)data, &tableID, 4);
+	RM_ScanIterator rmsi;
+	RID rid;
+	scan("Columns", "table-id", EQ_OP, data, attribute1, rmsi);
+	free(data);
+	void* returnedData = malloc(200);
+	while (rmsi.getNextTuple(rid, returnedData) != RM_EOF)
+	{
+		Attribute attr1;
+		int offset = 0;
+		int nameSize = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		offset += 4;
+		char* fieldName = (char *)malloc(nameSize + 1);
+		memcpy(fieldName, (char *)returnedData + nullAttributesIndicatorActualSize + offset, nameSize);
+		fieldName[nameSize] = '\0';
+		offset += nameSize;
+		string stringfieldName = fieldName;
+		attr1.name = stringfieldName;
+		int fieldType = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		offset += 4;
+		attr1.type = (AttrType)fieldType;
+		int maxLength = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		attr1.length = (AttrLength)maxLength;
+		offset += sizeof(int);
+		int columnID = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		offset += sizeof(int);
+		int startVersion = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		offset += sizeof(int);
+		int endVersion = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		offset += sizeof(int);
+		int hasIndex = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		offset += sizeof(int);
+
+		if (stringfieldName == attributeName)
+		{
+			keyLength = maxLength;
+			keyAttribute = attr1;
+			hasIndex = 1;
+
+			void *tuple = malloc(200);
+			int nullAttributesIndicatorActualSize2 = ceil((double)8 / CHAR_BIT);
+			unsigned char *nullsIndicator = (unsigned char *)malloc(nullAttributesIndicatorActualSize2);
+			memset(nullsIndicator, 0, nullAttributesIndicatorActualSize2);
+			int tupleSize = 0;
+			prepareTuple_cols(8, nullsIndicator, tableID, attr1.name.size(), attr1.name, attr1.type, attr1.length, columnID, startVersion, endVersion, hasIndex, tuple, &tupleSize);
+
+			vector<Attribute> attributes;
+			RC rel1 = getAttributes("Columns", attributes);
+			if (rel1 == -1)
+				return -1;
+			fm_table->openFile("Columns", fh_table);
+			RC rel = fm_table->updateRecord(fh_table, attributes, tuple, rid);
+			if (rel == -1)
+				return -1;
+			fm_table->closeFile(fh_table);
+
+			fm_table->openFile("Columns", fh_table);
+
+			free(nullsIndicator);
+			free(tuple);
+			free(fieldName);
+			break;
+		}
+
+		free(fieldName);
+	}
+	free(returnedData);
+	fm_table->closeFile(fh_table);
+	rmsi.close();
+
+	//Insert all record keys and RIDs into index file
+	vector<string> attributeNameVec;
+	attributeNameVec.push_back(attributeName);
+	scan(tableName, NULL, NO_OP, NULL, attributeNameVec, rmsi);
+	void *key = malloc(keyLength);
+	IXFileHandle ixfileHandle;
+	if (IndexManager::instance()->openFile(indexFileName, ixfileHandle) == -1)
+	{
+#ifdef DEBUG
+		cerr << "Cannot open the index file while creating index" << endl;
+#endif
+		return -1;
+	}
+	while (rmsi.getNextTuple(rid, key) != RM_EOF)
+	{
+		if (IndexManager::instance()->insertEntry(ixfileHandle, keyAttribute, key, rid) == -1)
+		{
+#ifdef DEBUG
+			cerr << "Cannot insert entry while creating index, RID = " << rid.pageNum << ", " << rid.slotNum << endl;
+#endif
+			return -1;
+		}
+	}
+	free(key);
+	if (IndexManager::instance()->closeFile(ixfileHandle) == -1)
+	{
+#ifdef DEBUG
+		cerr << "Cannot close the index file while creating index" << endl;
+#endif
+		return -1;
+	}
+
+	return 0;
 }
 
 RC RelationManager::destroyIndex(const string &tableName, const string &attributeName)
 {
-	return -1;
+	//Delete index file
+	string indexFileName = getIndexName(tableName, attributeName);
+	if (IndexManager::instance()->destroyFile(indexFileName) == -1)
+	{
+#ifdef DEBUG
+		cerr << "Cannot create the index file while creating index" << endl;
+#endif
+		return -1;
+	}
+	this->map_hasIndex[indexFileName] = false;
+
+	//Find the table ID
+	int tableID = getTableID(tableName);
+	//Change the value of hasIndex in Column table
+	int keyLength;
+	Attribute keyAttribute;
+	vector<string> attribute1;
+	attribute1.push_back("column-name");
+	attribute1.push_back("column-type");
+	attribute1.push_back("column-length");
+	attribute1.push_back("column-position");
+	attribute1.push_back("startVersion");
+	attribute1.push_back("endVersion");
+	attribute1.push_back("hasIndex");
+	int nullAttributesIndicatorActualSize = ceil((double)6 / CHAR_BIT);
+	void *data = malloc(4);
+	memcpy((char *)data, &tableID, 4);
+	RM_ScanIterator rmsi;
+	RID rid;
+	scan("Columns", "table-id", EQ_OP, data, attribute1, rmsi);
+	free(data);
+	void* returnedData = malloc(200);
+	while (rmsi.getNextTuple(rid, returnedData) != RM_EOF)
+	{
+		Attribute attr1;
+		int offset = 0;
+		int nameSize = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		offset += 4;
+		char* fieldName = (char *)malloc(nameSize + 1);
+		memcpy(fieldName, (char *)returnedData + nullAttributesIndicatorActualSize + offset, nameSize);
+		fieldName[nameSize] = '\0';
+		offset += nameSize;
+		string stringfieldName = fieldName;
+		attr1.name = stringfieldName;
+		int fieldType = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		offset += 4;
+		attr1.type = (AttrType)fieldType;
+		int maxLength = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		attr1.length = (AttrLength)maxLength;
+		offset += sizeof(int);
+		int columnID = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		offset += sizeof(int);
+		int startVersion = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		offset += sizeof(int);
+		int endVersion = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		offset += sizeof(int);
+		int hasIndex = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		offset += sizeof(int);
+
+		if (stringfieldName == attributeName)
+		{
+			keyLength = maxLength;
+			keyAttribute = attr1;
+			hasIndex = 0;
+
+			void *tuple = malloc(200);
+			int nullAttributesIndicatorActualSize2 = ceil((double)8 / CHAR_BIT);
+			unsigned char *nullsIndicator = (unsigned char *)malloc(nullAttributesIndicatorActualSize2);
+			memset(nullsIndicator, 0, nullAttributesIndicatorActualSize2);
+			int tupleSize = 0;
+			prepareTuple_cols(8, nullsIndicator, tableID, attr1.name.size(), attr1.name, attr1.type, attr1.length, columnID, startVersion, endVersion, hasIndex, tuple, &tupleSize);
+
+			vector<Attribute> attributes;
+			RC rel1 = getAttributes("Columns", attributes);
+			if (rel1 == -1)
+				return -1;
+			fm_table->openFile("Columns", fh_table);
+			RC rel = fm_table->updateRecord(fh_table, attributes, tuple, rid);
+			if (rel == -1)
+				return -1;
+			fm_table->closeFile(fh_table);
+
+			fm_table->openFile("Columns", fh_table);
+
+			free(nullsIndicator);
+			free(tuple);
+			free(fieldName);
+			break;
+		}
+		free(fieldName);
+	}
+	free(returnedData);
+	fm_table->closeFile(fh_table);
+	rmsi.close();
+
+	return 0;
 }
 
 RC RelationManager::indexScan(const string &tableName,
@@ -1161,5 +1573,77 @@ RC RelationManager::indexScan(const string &tableName,
 	bool highKeyInclusive,
 	RM_IndexScanIterator &rm_IndexScanIterator)
 {
-	return -1;
+	string indexFileName = getIndexName(tableName, attributeName);
+	IXFileHandle ixfileHandle;
+	if (IndexManager::instance()->openFile(indexFileName, ixfileHandle) == -1)
+	{
+#ifdef DEBUG
+		cerr << "Cannot open the index file while scanning" << endl;
+#endif
+		return -1;
+	}
+
+	//Find the table ID
+	int tableID = getTableID(tableName);
+	//Change the value of hasIndex in Column table
+	int keyLength = 0;
+	Attribute keyAttribute;
+	vector<string> attribute1;
+	attribute1.push_back("column-name");
+	attribute1.push_back("column-type");
+	attribute1.push_back("column-length");
+	int nullAttributesIndicatorActualSize = ceil((double)3 / CHAR_BIT);
+	RM_ScanIterator rmsi;
+	RID rid;
+	scan("Columns", "table-id", EQ_OP, &tableID, attribute1, rmsi);
+	void* returnedData = malloc(200);
+	while (rmsi.getNextTuple(rid, returnedData) != RM_EOF)
+	{
+		Attribute attr1;
+		int offset = 0;
+		int nameSize = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		offset += sizeof(int);
+		char* fieldName = (char *)malloc(nameSize + 1);
+		memcpy(fieldName, (char *)returnedData + nullAttributesIndicatorActualSize + offset, nameSize);
+		fieldName[nameSize] = '\0';
+		offset += nameSize;
+		string stringfieldName = fieldName;
+		attr1.name = stringfieldName;
+		int fieldType = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		offset += sizeof(int);
+		attr1.type = (AttrType)fieldType;
+		int maxLength = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
+		attr1.length = (AttrLength)maxLength;
+		offset += sizeof(int);
+
+		if (stringfieldName == attributeName)
+		{
+			keyLength = maxLength;
+			keyAttribute = attr1;
+			free(fieldName);
+			break;
+		}
+		free(fieldName);
+	}
+	free(returnedData);
+	fm_table->closeFile(fh_table);
+	rmsi.close();
+
+	if (keyLength == 0)
+	{
+#ifdef DEBUG
+		cerr << "Cannot load the key while scanning" << endl;
+#endif
+		return -1;
+	}
+
+	if (IndexManager::instance()->scan(ixfileHandle, keyAttribute, lowKey, highKey, lowKeyInclusive, highKeyInclusive, rm_IndexScanIterator.ixScanIterator) == -1)
+	{
+#ifdef DEBUG
+		cerr << "Cannot scan the index file while scanning" << endl;
+#endif
+		return -1;
+	}
+
+	return 0;
 }
