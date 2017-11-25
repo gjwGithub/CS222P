@@ -6,6 +6,7 @@
 #include <vector>
 #include <unordered_map>
 #include "../rbf/rbfm.h"
+#include "../ix/ix.h"
 
 using namespace std;
 
@@ -30,8 +31,11 @@ public:
 	~RM_IndexScanIterator() {}; 	// Destructor
 
 									// "key" follows the same format as in IndexManager::insertEntry()
-	RC getNextEntry(RID &rid, void *key) { return RM_EOF; };  	// Get next matching entry
-	RC close() { return -1; };             			// Terminate index scan
+	RC getNextEntry(RID &rid, void *key) { return ixScanIterator.getNextEntry(rid, data); };  	// Get next matching entry
+	RC close() { return ixScanIterator.close(); };             			// Terminate index scan
+
+public:
+	IX_ScanIterator ixScanIterator;
 };
 
 // Relation Manager
@@ -70,7 +74,7 @@ public:
 
   RC readAttribute(const string &tableName, const RID &rid, const string &attributeName, void *data);
   void prepareTuple_tables(int attributeCount, unsigned char *nullAttributesIndicator, const int Table_ID, const int lengthOftable, const string &tableName, const int lengthOffie,const string &fieldName, const int isSys, void *buffer, int *tupleSize);
-  void prepareTuple_cols(int attributeCount, unsigned char *nullAttributesIndicator, const int Table_ID, const int lengthOffield, const string &fieldName, const int fieldOfType, const int max_length, const int field_ID, const int startVersion, const int endVersion, void *buffer, int *tupleSize);
+  void prepareTuple_cols(int attributeCount, unsigned char *nullAttributesIndicator, const int Table_ID, const int lengthOffield, const string &fieldName, const int fieldOfType, const int max_length, const int field_ID, const int startVersion, const int endVersion, const int hasIndex, void *buffer, int *tupleSize);
   // Scan returns an iterator to allow the caller to go through the results one by one.
   // Do not store entire results in the scan iterator.
   RC scan(const string &tableName,
@@ -79,6 +83,10 @@ public:
       const void *value,                    // used in the comparison
       const vector<string> &attributeNames, // a list of projected attributes
       RM_ScanIterator &rm_ScanIterator);
+
+  string getIndexName(const string &tableName, const string &attributeName);
+
+  int getTableID(const string &tableName);
 
   RC createIndex(const string &tableName, const string &attributeName);
 
