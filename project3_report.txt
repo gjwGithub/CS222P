@@ -1,38 +1,89 @@
 1. Basic information
-Team number (e.g., 01) : 
-#1 Student ID : 
-#1 Student Name : 
-#2 Student ID : 
-#2 Student Name : 
-OS (bit) :
-gcc version :
+Team number (e.g., 01) : 13
+#1 Student ID :  48895604
+#1 Student Name :  Liu Yuliang
+#2 Student ID : 86808780
+#2 Student Name :  Gu Jiawei
+OS (bit) :    64 bit  maxos high Sierra / Ubuntu
+gcc version :   5.4.0
 
 
 2. Meta-data page in an index file
 - Show your meta-data page of an index design if you have any. 
 
+In the meta-data page, we have five attribute of the B+ tree which are on the below:
+  (1) ixReadPageCounter: equals to the readPageCounter of fileHandle. Represent for how many read operations have been made.
+  (2) ixWritePageCounter: equals to the writepagecounter of fileHandle. Represent for how many write operations have been made.
+  (3) ixAppendPageCounter: equals to the appendPageCounter of fileHandle. Represent for how many append operations have been made.
+  (4) smallestLeaf:   represent for the file page of the B+tree's smallest leaf node. 
+  (5) root: represent for the file page of the B+tree's root node
+  (6) pageCount: represent for how many pages are there in this page file.
+
 
 3. Index Entry Format
 - Show your index entry design (structure). 
 
+  We make two index entry. 
+    The first is leafEntry: 
+       the leafEntry contains two attribute: key and rid.
+    The other is InternalEntry:
+       The internalEntry contains three attributes:  key, leftChild which pointer to left node and rightChild which       pointer to right node.
+ 
 
 4. Page Format
 - Show your internal-page (non-leaf node) design.
+  
+  We create InternalNode class to handle the internal-page. In InternalNode, we have severals attritubes:
+  (1) nodeType:  store if the node is internal node or leaf node
+  (2) nodeSize: store how many bites have been occupied
+  (3) parentPointer:  pointer to the parent of the node
+  (4) isDirty: 1 represent the node has been modified,0 represent the node is unmodified.
+  (5) pageNum: store the file page of the node.
+  (6) vector<InternalEntry> InternalEntries: store the all key-value
+  (7) isLoaded: whether this internal node has been loaded in memory
+
+               -----------------------------------
+              |pointer|key|pointer|key|pointer...|
+               -----------------------------------
+
 
 - Show your leaf-page (leaf node) design.
+
+  We create LeafNode class to handle the leaf-page. In LeafNode, we have severals attritubes:
+  (1) nodeType: store if the node is internal node or leaf node
+  (2) nodeSize: store how many bites have been occupied
+  (3) parentPointer:  pointer to the parent of the node
+  (4) isDirty: 1 represent the node has been modified,0 represent the node is unmodified.
+  (5) pageNum: store the file page of the node.
+  (6) rightPointer: pointer to the right silbing
+  (7) vector<leafEntry> LeafEntries: store the all key-value
+  (8) isLoaded: whether this internal node has been loaded in memory
+   
+              ------------------------------------
+              |key1|key2|key3|key4|key5|.........|
+              -    -    -    -    -    -
+              |rid1|rid2|rid3|rid4|rid5|.........|
+              ------------------------------------
 
 
 5. Implementation Detail
 - Have you added your own source file (.cc or .h)?
+  No
 
 - Have you implemented non-lazy deletion? Choose Yes or No: 
+  Yes
 
 - Have you implemented duplicated key handling that can span multiple pages? Choose Yes or No: 
   If yes, please explain briefly how you have implemented this feature.
+   No
 
 - Other implementation details:
+
+  1. We use hashmap<pageNum,Node> to store the relation of pageNum and node class. So we could much faster to find the node We want.
+  2.when split the node for insert operation, We will check if the entries around the middle entry have the same key as the middle entry. If so, we will move all the around entries to the new node. So we could guarantee the dulpicated keys are in the same page.
 
 
 6. Other (optional)
 - Freely use this section to tell us about things that are related to the project 3, but not related to the other sections (optional)
+
 

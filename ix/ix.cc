@@ -17,6 +17,8 @@ IndexManager::IndexManager()
 
 IndexManager::~IndexManager()
 {
+	if (_index_manager)
+		delete _index_manager;
 }
 
 RC IndexManager::createFile(const string &fileName)
@@ -85,7 +87,6 @@ RC IndexManager::createFile(const string &fileName)
 		return -1;
 	}
 	return 0;
-
 }
 
 RC IXFileHandle::readMetaPage() {
@@ -243,16 +244,60 @@ RC IndexManager::closeFile(IXFileHandle &ixfileHandle)
 
 RC IndexManager::insertEntry(IXFileHandle &ixfileHandle, const Attribute &attribute, const void *key, const RID &rid)
 {
+	//LeafEntry leafEntry(attribute.type, key, rid);
+	//if (ixfileHandle.tree == NULL) {
+	//	ixfileHandle.tree = new BTree();
+	//	ixfileHandle.tree->attrType = attribute.type;
+	//}
+	//if (ixfileHandle.root == -1) {
+	//	ixfileHandle.tree->root = NULL;
+	//}
+	//RC rel = ixfileHandle.tree->insertEntry(ixfileHandle, leafEntry);
+	//return rel;
+
 	LeafEntry leafEntry(attribute.type, key, rid);
-	if (ixfileHandle.tree == NULL) {
+	if (ixfileHandle.tree)
+	{
+		RC status = ixfileHandle.tree->insertEntry(ixfileHandle, leafEntry);
+		return status;
+	}
+	else
+	{
 		ixfileHandle.tree = new BTree();
 		ixfileHandle.tree->attrType = attribute.type;
+
+		if (ixfileHandle.root == NULLNODE)
+		{
+			ixfileHandle.tree->root = NULL;
+		}
+		else
+		{
+			char *rootPage = (char*)malloc(PAGE_SIZE);
+			ixfileHandle.readPage(ixfileHandle.root, rootPage);
+			ixfileHandle.tree->root = ixfileHandle.tree->generateNode(rootPage);
+			(*ixfileHandle.tree->root)->pageNum = ixfileHandle.root;
+			free(rootPage);
+			ixfileHandle.tree->nodeMap.insert(make_pair(ixfileHandle.root, ixfileHandle.tree->root));
+		}
+
+		if (ixfileHandle.root == ixfileHandle.smallestLeaf)
+		{
+			ixfileHandle.tree->smallestLeaf = ixfileHandle.tree->root;
+		}
+		else
+		{
+			char *smallestLeafPage = (char*)malloc(PAGE_SIZE);
+			ixfileHandle.readPage(ixfileHandle.smallestLeaf, smallestLeafPage);
+			ixfileHandle.tree->smallestLeaf = ixfileHandle.tree->generateNode(smallestLeafPage);
+			(*ixfileHandle.tree->smallestLeaf)->pageNum = ixfileHandle.smallestLeaf;
+			free(smallestLeafPage);
+			ixfileHandle.tree->nodeMap.insert(make_pair(ixfileHandle.smallestLeaf, ixfileHandle.tree->smallestLeaf));
+		}
+
+		RC status = ixfileHandle.tree->insertEntry(ixfileHandle, leafEntry);
+		return status;
 	}
-	if (ixfileHandle.root == -1) {
-		ixfileHandle.tree->root = NULL;
-	}
-	RC rel = ixfileHandle.tree->insertEntry(ixfileHandle, leafEntry);
-	return rel;
+	return 0;
 }
 
 RC IndexManager::deleteEntry(IXFileHandle &ixfileHandle, const Attribute &attribute, const void *key, const RID &rid)
@@ -274,6 +319,7 @@ RC IndexManager::deleteEntry(IXFileHandle &ixfileHandle, const Attribute &attrib
 #ifdef DEBUG
 			cerr << "Cannot read the root node when deleting entry" << endl;
 #endif
+			free(leafEntry.key);
 			return -1;
 		}
 		char *rootPage = (char*)malloc(PAGE_SIZE);
@@ -373,7 +419,6 @@ RC IndexManager::scan(IXFileHandle &ixfileHandle,
 			(*ixfileHandle.tree->root)->pageNum = ixfileHandle.root;
 			free(rootPage);
 			ixfileHandle.tree->nodeMap.insert(make_pair(ixfileHandle.root, ixfileHandle.tree->root));
-
 			if (ixfileHandle.smallestLeaf == ixfileHandle.root)
 			{
 				ixfileHandle.tree->smallestLeaf = ixfileHandle.tree->root;
@@ -960,8 +1005,20 @@ InternalNode::InternalNode()
 
 InternalNode::~InternalNode()
 {
-	for (auto&i : this->internalEntries)
+	for (auto &i : this->internalEntries)
+	{
+		if (i.leftChild && *i.leftChild && (*i.leftChild)->nodeType == UnknownNodeType)
+		{
+			delete *i.leftChild;
+			delete i.leftChild;
+		}
+		if (i.rightChild && *i.rightChild && (*i.rightChild)->nodeType == UnknownNodeType)
+		{
+			delete *i.rightChild;
+			delete i.rightChild;
+		}
 		free(i.key);
+	}
 }
 
 LeafNode::LeafNode()
@@ -978,8 +1035,20 @@ LeafNode::LeafNode()
 
 LeafNode::~LeafNode()
 {
-	for (auto&i : this->leafEntries)
+	if (this->rightPointer && *this->rightPointer && (*this->rightPointer)->nodeType == UnknownNodeType)
+	{
+		delete *this->rightPointer;
+		delete this->rightPointer;
+	}
+	if (this->overflowPointer && *this->overflowPointer && (*this->overflowPointer)->nodeType == UnknownNodeType)
+	{
+		delete *this->overflowPointer;
+		delete this->overflowPointer;
+	}
+	for (auto &i : this->leafEntries)
+	{
 		free(i.key);
+	}
 }
 
 BTree::BTree()
@@ -993,10 +1062,16 @@ BTree::~BTree()
 {
 	for (auto &item : this->nodeMap)
 	{
+		if (item.second && *item.second)
+		{
+			delete *item.second;
+			*item.second = NULL;
+		}
+	}
+	for (auto &item : this->nodeMap)
+	{
 		if (item.second)
 		{
-			if (*item.second)
-				delete *item.second;
 			delete item.second;
 		}
 	}
@@ -1038,20 +1113,20 @@ RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
 		//ixfileHandle.writeMetaPage();
 	}
 	else {
-		Node** root_node;  // Initiat root node
-		unordered_map<PageNum, Node**>::iterator iter; //judge the curnode exist in the hashmap
-		iter = nodeMap.find(ixfileHandle.root);
-		if (iter != nodeMap.end()) {
-			root_node = iter->second;
-		}
-		else {
-			void* data = malloc(PAGE_SIZE);
-			ixfileHandle.readPage(ixfileHandle.root, data);
-			root_node = generateNode((char *)data);
-			nodeMap.insert(make_pair(ixfileHandle.root, root_node));
-			free(data);
-		}
-		Node** tar_leafNode = findLeafnode(ixfileHandle, pair, root_node);     //find the inserted leaf node
+		//Node** root_node;  // Initiat root node
+		//unordered_map<PageNum, Node**>::iterator iter; //judge the curnode exist in the hashmap
+		//iter = nodeMap.find(ixfileHandle.root);
+		//if (iter != nodeMap.end()) {
+		//	root_node = iter->second;
+		//}
+		//else {
+		//	void* data = malloc(PAGE_SIZE);
+		//	ixfileHandle.readPage(ixfileHandle.root, data);
+		//	root_node = generateNode((char *)data);
+		//	nodeMap.insert(make_pair(ixfileHandle.root, root_node));
+		//	free(data);
+		//}
+		Node** tar_leafNode = findLeafnode(ixfileHandle, pair, this->root);     //find the inserted leaf node
 		if (((LeafNode*)*tar_leafNode)->isLoaded == false) {
 			/*void* data = malloc(PAGE_SIZE);
 			PageNum cur_pageNum = ((LeafNode*)*tar_leafNode)->pageNum;
@@ -1120,7 +1195,8 @@ RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
 
 			//move the origin leafnode the second half records to the new leafnode, and update the nodesize
 			for (size_t i = mid_index; i < ((LeafNode*)*tar_leafNode)->leafEntries.size(); i++) {
-				((LeafNode*)*new_node)->leafEntries.push_back(((LeafNode*)*tar_leafNode)->leafEntries[i]);
+				LeafEntry leafEntry(this->attrType, ((LeafNode*)*tar_leafNode)->leafEntries[i].key, ((LeafNode*)*tar_leafNode)->leafEntries[i].rid);
+				((LeafNode*)*new_node)->leafEntries.push_back(leafEntry);
 				int var_length;
 				if (attrType == TypeVarChar) {
 					memcpy(&var_length, (char *)((LeafNode*)*tar_leafNode)->leafEntries[i].key, 4);
@@ -1151,7 +1227,11 @@ RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
 			//free(key_mid);
 			//delete the second half records from the origin leafnode.
 			//for (int i = mid_index; i < ((LeafNode*)*tar_leafNode)->leafEntries.size(); i++) {
+
+			for (auto i = ((LeafNode*)*tar_leafNode)->leafEntries.begin() + mid_index; i != ((LeafNode*)*tar_leafNode)->leafEntries.end(); i++)
+				free(i->key);
 			((LeafNode*)*tar_leafNode)->leafEntries.erase(((LeafNode*)*tar_leafNode)->leafEntries.begin() + mid_index, ((LeafNode*)*tar_leafNode)->leafEntries.end());
+
 			//}
 			//update the origin and new node's rightpointer
 			// ((LeafNode*)*new_node)->rightPointer = ((LeafNode*)*tar_leafNode)->rightPointer;
@@ -1203,7 +1283,7 @@ RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
 			else {  // it have the parentNode
 				Node** origin_parentNode = NULL;
 				PageNum origin_parentNode_pagenum = ((InternalNode*)*(((LeafNode*)*tar_leafNode)->parentPointer))->pageNum;
-				iter = nodeMap.find(origin_parentNode_pagenum);
+				auto iter = nodeMap.find(origin_parentNode_pagenum);
 				if (iter != nodeMap.end()) {
 					origin_parentNode = iter->second;
 				}
@@ -1269,7 +1349,7 @@ RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
 				// }
 				//
 				if (((InternalNode*)*origin_parentNode)->nodeSize <= PAGE_SIZE) {
-					void* new_page = generatePage(tar_leafNode);
+					void* new_page = generatePage(origin_parentNode);
 					ixfileHandle.writePage(((InternalNode*)*origin_parentNode)->pageNum, new_page);
 					free(new_page);
 					return 0;
@@ -1281,7 +1361,8 @@ RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
 					((InternalNode*)*new_parentNode)->nodeSize += sizeof(int);
 					//move the origin leafnode the second half records to the new leafnode, and update the nodesize
 					for (size_t i = ((InternalNode*)*origin_parentNode)->internalEntries.size() / 2 + 1; i < ((InternalNode*)*origin_parentNode)->internalEntries.size(); i++) {
-						((InternalNode*)*new_parentNode)->internalEntries.push_back(((InternalNode*)*origin_parentNode)->internalEntries[i]);
+						InternalEntry internalEntry(this->attrType, ((InternalNode*)*origin_parentNode)->internalEntries[i].key, ((InternalNode*)*origin_parentNode)->internalEntries[i].leftChild, ((InternalNode*)*origin_parentNode)->internalEntries[i].rightChild);
+						((InternalNode*)*new_parentNode)->internalEntries.push_back(internalEntry);
 						if (attrType == TypeVarChar) {
 							memcpy(&var_length, (char *)((InternalNode*)*origin_parentNode)->internalEntries[i].key, 4);
 							var_length += 4;
@@ -1308,6 +1389,8 @@ RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
 					}
 					//delete the second half records from the origin leafnode.
 					//for (int i = mid_index; i < ((InternalNode*)*origin_parentNode)->internalEntries.size(); i++) {
+					for (auto i = ((InternalNode*)*origin_parentNode)->internalEntries.begin() + mid_index; i != ((InternalNode*)*origin_parentNode)->internalEntries.end(); i++)
+						free(i->key);
 					((InternalNode*)*origin_parentNode)->internalEntries.erase(((InternalNode*)*origin_parentNode)->internalEntries.begin() + mid_index, ((InternalNode*)*origin_parentNode)->internalEntries.end());
 					//}
 					//update the origin and new node's rightpointer
@@ -1640,7 +1723,10 @@ RC BTree::removeEntryFromNode(Node** node, const LeafEntry &pair)
 			{
 				//Keep the last entry in root node left if we want to adjust the root
 				if ((*node == *this->root && ((InternalNode*)*node)->internalEntries.size() > 1) || *node != *this->root)
+				{
+					free(i->key);
 					((InternalNode*)*node)->internalEntries.erase(i);
+				}
 				OffsetType decreaseSize = getEntrySize(InternalNodeType, pair, ((InternalNode*)*node)->internalEntries.size() == 0);
 				decreaseSize += sizeof(OffsetType); //The size of record offset in slot table
 				(*node)->nodeSize -= decreaseSize;
@@ -1656,6 +1742,7 @@ RC BTree::removeEntryFromNode(Node** node, const LeafEntry &pair)
 		for (auto i = ((LeafNode*)*node)->leafEntries.begin(); i != ((LeafNode*)*node)->leafEntries.end(); i++)
 			if (compareEntry(pair, *i) == 0)
 			{
+				free(i->key);
 				((LeafNode*)*node)->leafEntries.erase(i);
 				OffsetType decreaseSize = getEntrySize(LeafNodeType, pair, ((LeafNode*)*node)->leafEntries.size() == 0);
 				decreaseSize += sizeof(OffsetType); //The size of record offset in slot table
@@ -2123,6 +2210,7 @@ RC BTree::redistributeNodes(Node** node, Node** neighbor, int neighborIndex, int
 			//Insert the borrowed entry, update parent node, and delete the entry in the neighbor node
 			((InternalNode*)*node)->internalEntries.insert(((InternalNode*)*node)->internalEntries.begin(), borrowedEntry);
 			((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex] = parentEntry;
+			free(((InternalNode*)*neighbor)->internalEntries.back().key);
 			((InternalNode*)*neighbor)->internalEntries.erase(((InternalNode*)*neighbor)->internalEntries.end() - 1);
 		}
 		else if ((*node)->nodeType == LeafNodeType && (*neighbor)->nodeType == LeafNodeType)
@@ -2181,11 +2269,10 @@ RC BTree::redistributeNodes(Node** node, Node** neighbor, int neighborIndex, int
 			{
 				LeafEntry borrowedEntry(this->attrType, ((LeafNode*)*neighbor)->leafEntries.back().key, ((LeafNode*)*neighbor)->leafEntries.back().rid);
 				((LeafNode*)*node)->leafEntries.insert(((LeafNode*)*node)->leafEntries.begin(), borrowedEntry);
+				free(((LeafNode*)*neighbor)->leafEntries.back().key);
 				((LeafNode*)*neighbor)->leafEntries.erase(((LeafNode*)*neighbor)->leafEntries.end() - 1);
 			}
 			((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex] = parentEntry;
-
-			free(firstBorrowedEntry.key);
 		}
 		else
 		{
@@ -2239,6 +2326,7 @@ RC BTree::redistributeNodes(Node** node, Node** neighbor, int neighborIndex, int
 			//Insert the borrowed entry, update parent node, and delete the entry in the neighbor node
 			((InternalNode*)*node)->internalEntries.push_back(borrowedEntry);
 			((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex] = parentEntry;
+			free(((InternalNode*)*neighbor)->internalEntries[0].key);
 			((InternalNode*)*neighbor)->internalEntries.erase(((InternalNode*)*neighbor)->internalEntries.begin());
 		}
 		else if ((*node)->nodeType == LeafNodeType && (*neighbor)->nodeType == LeafNodeType)
@@ -2297,11 +2385,10 @@ RC BTree::redistributeNodes(Node** node, Node** neighbor, int neighborIndex, int
 			{
 				LeafEntry borrowedEntry(this->attrType, ((LeafNode*)*neighbor)->leafEntries[i].key, ((LeafNode*)*neighbor)->leafEntries[i].rid);
 				((LeafNode*)*node)->leafEntries.push_back(borrowedEntry);
+				free(((LeafNode*)*neighbor)->leafEntries[0].key);
 				((LeafNode*)*neighbor)->leafEntries.erase(((LeafNode*)*neighbor)->leafEntries.begin());
 			}
 			((InternalNode*)*(*node)->parentPointer)->internalEntries[keyIndex] = parentEntry;
-
-			free(firstBorrowedEntry.key);
 		}
 		else
 		{
