@@ -1291,12 +1291,11 @@ bool RelationManager::hasIndex(const string &tableName, const string &attributeN
 		return search->second;
 	else
 	{
-		int tableID = getTableID(tableName);
-		Attribute keyAttribute;
 		vector<string> attribute1;
 		attribute1.push_back("column-name");
 		attribute1.push_back("hasIndex");
 		int nullAttributesIndicatorActualSize = ceil((double)2 / CHAR_BIT);
+		int tableID = getTableID(tableName);
 		RM_ScanIterator rmsi;
 		RID rid;
 		scan("Columns", "table-id", EQ_OP, &tableID, attribute1, rmsi);
@@ -1323,12 +1322,16 @@ bool RelationManager::hasIndex(const string &tableName, const string &attributeN
 				rmsi.close();
 				return hasIndex;
 			}
+
 			free(fieldName);
 		}
 		free(returnedData);
 		fm_table->closeFile(fh_table);
 		rmsi.close();
 	}
+#ifdef DEBUG
+	cerr << "Cannot find the field when checking whether it has an index file" << endl;
+#endif
 	return false;
 }
 
@@ -1343,7 +1346,6 @@ RC RelationManager::createIndex(const string &tableName, const string &attribute
 #endif
 		return -1;
 	}
-	this->map_hasIndex[indexFileName] = true;
 
 	//Find the table ID
 	int tableID = getTableID(tableName);
@@ -1476,7 +1478,6 @@ RC RelationManager::destroyIndex(const string &tableName, const string &attribut
 #endif
 		return -1;
 	}
-	this->map_hasIndex[indexFileName] = false;
 
 	//Find the table ID
 	int tableID = getTableID(tableName);
