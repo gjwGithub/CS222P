@@ -221,6 +221,13 @@ class Project : public Iterator {
         RC getNextTuple(void *data) {return QE_EOF;};
         // For attribute in vector<Attribute>, name it as rel.attr
         void getAttributes(vector<Attribute> &attrs) const{};
+
+		Iterator* input;
+		vector<Attribute> attrs;
+		vector<int> attrIndexes;
+		size_t totalAttrsCount;
+		bool end;
+		char buffer[PAGE_SIZE];
 };
 
 class BNLJoin : public Iterator {

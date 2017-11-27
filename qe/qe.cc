@@ -107,26 +107,108 @@ Filter::Filter(Iterator* input, const Condition &condition)
 
 RC Filter::getNextTuple(void *data)
 {
-	if (!end)
+	if (!this->end)
 	{
-		while (input->getNextTuple(data) != QE_EOF)
+		while (this->input->getNextTuple(data) != QE_EOF)
 		{
-			if (condition.op == NO_OP)
+			if (this->condition.op == NO_OP)
 				return 0;
 			Value leftValue = getAttributeValue(data, this->leftIndex, this->attrs);
 			Value rightValue;
-			if (condition.bRhsIsAttr)
+			if (this->condition.bRhsIsAttr)
 				rightValue = getAttributeValue(data, this->rightIndex, this->attrs);
 			else
-				rightValue = condition.rhsValue;
+				rightValue = this->condition.rhsValue;
 			if (compareAttributes(leftValue.data, rightValue.data, this->condition.op, leftValue.type))
 				return 0;
 		}
-		end = true;
+		this->end = true;
 	}
 	return QE_EOF;
 }
 // ... the rest of your implementations go here
+
+Project::Project(Iterator *input,                    // Iterator of input R
+	const vector<string> &attrNames)    // vector containing attribute names
+{
+	this->input = input;
+	vector<Attribute> allAttrs;
+	this->input->getAttributes(allAttrs);
+	this->totalAttrsCount = allAttrs.size();
+	for (auto &i : attrNames)
+	{
+		for (size_t j = 0; j < allAttrs.size(); j++)
+		{
+			if (allAttrs[j].name == i)
+			{
+				this->attrIndexes.push_back(j);
+				this->attrs.push_back(allAttrs[j]);
+			}
+		}
+	}
+	this->end = false;
+}
+
+RC Project::getNextTuple(void *data)
+{
+	this->end = input->getNextTuple(this->buffer);
+	if (!this->end)
+	{
+		int nullIndicatorSize = ceil(this->attrs.size() / CHAR_BIT);
+		unsigned char* nullIndicator = (unsigned char*)malloc(nullIndicatorSize);
+		int offset = nullIndicatorSize;
+		int count = 0;
+		for (size_t i = 0; i < totalAttrsCount; i++, count++)
+		{
+			unsigned char nullFields = ((unsigned char*)this->buffer)[count / CHAR_BIT];
+			bool isNULL = ((unsigned char*)this->buffer)[count / CHAR_BIT] & (1 << (CHAR_BIT - 1 - count % CHAR_BIT));
+			if (i != this->attrIndexes[count])
+			{
+				if (!isNULL)
+				{
+					if (attrs[count].type == AttrType::TypeInt)
+						offset += sizeof(int);
+					else if (attrs[count].type == AttrType::TypeReal)
+						offset += sizeof(float);
+					else if (attrs[count].type == AttrType::TypeVarChar)
+					{
+						int strLength = *(int*)(this->buffer + offset);
+						offset += sizeof(int) + strLength;
+					}
+				}
+				continue;
+			}
+			else
+			{
+				if (isNULL)
+					nullFields += 1 << (7 - count % 8);
+				else
+				{
+					nullFields += 0 << (7 - count % 8);
+					if (attrs[count].type == AttrType::TypeInt)
+					{
+						memcpy((char*)data + offset, this->buffer + offset, sizeof(int));
+						offset += sizeof(int);
+					}
+					else if (attrs[count].type == AttrType::TypeReal)
+					{
+						memcpy((char*)data + offset, this->buffer + offset, sizeof(float));
+						offset += sizeof(float);
+					}
+					else if (attrs[count].type == AttrType::TypeVarChar)
+					{
+						int strLength = *(int*)(this->buffer + offset);
+						memcpy((char*)data + offset, this->buffer + offset, sizeof(int) + strLength);
+						offset += sizeof(int) + strLength;
+					}
+				}
+				((unsigned char*)data)[count / CHAR_BIT] = nullFields;
+			}	
+		}
+		return 0;
+	}
+	return QE_EOF;
+}
 
 INLJoin::INLJoin(Iterator *leftIn,           // Iterator of input R
 	IndexScan *rightIn,          // IndexScan Iterator of input S
