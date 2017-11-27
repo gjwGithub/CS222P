@@ -201,6 +201,13 @@ class Filter : public Iterator {
         RC getNextTuple(void *data) {return QE_EOF;};
         // For attribute in vector<Attribute>, name it as rel.attr
         void getAttributes(vector<Attribute> &attrs) const{};
+
+		Iterator* input;
+		Condition condition;
+		int leftIndex;
+		int rightIndex;
+		vector<Attribute> attrs;
+		bool end;
 };
 
 
@@ -239,14 +246,12 @@ class INLJoin : public Iterator {
         INLJoin(Iterator *leftIn,           // Iterator of input R
                IndexScan *rightIn,          // IndexScan Iterator of input S
                const Condition &condition   // Join condition
-        ){};
-        ~INLJoin(){};
+        );
+		~INLJoin() {};
 
-        RC getNextTuple(void *data){return QE_EOF;};
+        RC getNextTuple(void *data);
         // For attribute in vector<Attribute>, name it as rel.attr
-        void getAttributes(vector<Attribute> &attrs) const{};
-		int getAttrIndex(const vector<Attribute> &attrs, const string &attr);
-		Value getAttributeValue(const void* data, const int index, const vector<Attribute> &attrs);
+        //void getAttributes(vector<Attribute> &attrs) const;
 		RC readFromRight(IndexScan* rightScan, void * data);
 		RC outputJoinResult(void *data);
 
