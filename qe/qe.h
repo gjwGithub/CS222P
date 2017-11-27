@@ -245,6 +245,23 @@ class INLJoin : public Iterator {
         RC getNextTuple(void *data){return QE_EOF;};
         // For attribute in vector<Attribute>, name it as rel.attr
         void getAttributes(vector<Attribute> &attrs) const{};
+		int getAttrIndex(const vector<Attribute> &attrs, const string &attr);
+		Value getAttributeValue(const void* data, const int index, const vector<Attribute> &attrs);
+		RC readFromRight(IndexScan* rightScan, void * data);
+		RC outputJoinResult(void *data);
+
+		Iterator* leftIn;
+		IndexScan* rightIn;
+		Condition condition;
+
+		int leftIndex;
+		int rightIndex;
+		vector<Attribute> leftAttrs;
+		vector<Attribute> rightAttrs;
+		char leftBuffer[PAGE_SIZE];
+		char rightBuffer[PAGE_SIZE];
+
+		bool end;
 };
 
 // Optional for everyone. 10 extra-credit points

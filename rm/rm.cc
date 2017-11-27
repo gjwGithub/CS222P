@@ -1346,6 +1346,7 @@ RC RelationManager::createIndex(const string &tableName, const string &attribute
 #endif
 		return -1;
 	}
+	this->map_hasIndex[indexFileName] = true;
 
 	//Find the table ID
 	int tableID = getTableID(tableName);
@@ -1478,6 +1479,7 @@ RC RelationManager::destroyIndex(const string &tableName, const string &attribut
 #endif
 		return -1;
 	}
+	this->map_hasIndex[indexFileName] = false;
 
 	//Find the table ID
 	int tableID = getTableID(tableName);
