@@ -92,7 +92,7 @@ bool compareAttributes(void* v1, void* v2, CompOp op, AttrType type)
 	}
 }
 
-Filter::Filter(Iterator* input, const Condition &condition) 
+Filter::Filter(Iterator* input, const Condition &condition)
 {
 	this->input = input;
 	this->condition = condition;
@@ -126,6 +126,11 @@ RC Filter::getNextTuple(void *data)
 	}
 	return QE_EOF;
 }
+
+void Filter::getAttributes(vector<Attribute> &attrs) const
+{
+	attrs = this->attrs;
+}
 // ... the rest of your implementations go here
 
 Project::Project(Iterator *input,                    // Iterator of input R
@@ -155,7 +160,6 @@ RC Project::getNextTuple(void *data)
 	if (!this->end)
 	{
 		int nullIndicatorSize = ceil(this->attrs.size() / CHAR_BIT);
-		unsigned char* nullIndicator = (unsigned char*)malloc(nullIndicatorSize);
 		int offset = nullIndicatorSize;
 		int count = 0;
 		for (size_t i = 0; i < totalAttrsCount; i++, count++)
@@ -203,11 +207,16 @@ RC Project::getNextTuple(void *data)
 					}
 				}
 				((unsigned char*)data)[count / CHAR_BIT] = nullFields;
-			}	
+			}
 		}
 		return 0;
 	}
 	return QE_EOF;
+}
+
+void Project::getAttributes(vector<Attribute> &attrs) const
+{
+	attrs = this->attrs;
 }
 
 INLJoin::INLJoin(Iterator *leftIn,           // Iterator of input R
@@ -259,13 +268,12 @@ RC INLJoin::readFromRight(IndexScan* rightScan, void * data)
 RC INLJoin::outputJoinResult(void *data)
 {
 	int nullIndicatorSize = ceil((this->leftAttrs.size() + this->rightAttrs.size()) / CHAR_BIT);
-	unsigned char* nullIndicator = (unsigned char*)malloc(nullIndicatorSize);
 	int offset = nullIndicatorSize;
 	//Copy left attributes
 	int leftOffset = ceil(this->leftAttrs.size() / CHAR_BIT);
 	for (size_t i = 0; i < this->leftAttrs.size(); i++)
 	{
-		unsigned char nullFields = ((unsigned char*)data)[i / CHAR_BIT];
+		unsigned char nullFields = ((unsigned char*)this->leftBuffer)[i / CHAR_BIT];
 		bool isNULL = this->leftBuffer[i / CHAR_BIT] & (1 << (CHAR_BIT - 1 - i % CHAR_BIT));
 		if (isNULL)
 			nullFields += 1 << (7 - i % 8);
@@ -298,7 +306,7 @@ RC INLJoin::outputJoinResult(void *data)
 	int rightOffset = ceil(this->rightAttrs.size() / CHAR_BIT);
 	for (size_t i = 0; i < this->rightAttrs.size(); i++)
 	{
-		unsigned char nullFields = ((unsigned char*)data)[(i + this->leftAttrs.size()) / CHAR_BIT];
+		unsigned char nullFields = ((unsigned char*)this->rightBuffer)[i / CHAR_BIT];
 		bool isNULL = this->rightBuffer[i / CHAR_BIT] & (1 << (CHAR_BIT - 1 - i % CHAR_BIT));
 		if (isNULL)
 			nullFields += 1 << (7 - (i + this->leftAttrs.size()) % 8);
@@ -328,4 +336,141 @@ RC INLJoin::outputJoinResult(void *data)
 		((unsigned char*)data)[(i + this->leftAttrs.size()) / CHAR_BIT] = nullFields;
 	}
 	return 0;
+}
+
+void INLJoin::getAttributes(vector<Attribute>& attrs) const
+{
+	attrs = this->leftAttrs;
+	attrs.insert(attrs.end(), this->rightAttrs.begin(), this->rightAttrs.end());
+}
+
+Aggregate::Aggregate(Iterator *input,          // Iterator of input R
+	Attribute aggAttr,        // The attribute over which we are computing an aggregate
+	AggregateOp op            // Aggregate operation
+)
+{
+	this->input = input;
+	this->aggAttr = aggAttr;
+	this->op = op;
+	this->input->getAttributes(this->attrs);
+	this->attrIndex = getAttrIndex(this->attrs, this->aggAttr.name);
+}
+
+RC Aggregate::getNextTuple(void *data)
+{
+	((char*)data)[0] = 0;
+	switch (this->op)
+	{
+	case AggregateOp::AVG:
+		char* temp = (char*)malloc(PAGE_SIZE);
+		double sum = 0;
+		int count = 0;
+		while (this->input->getNextTuple(temp))
+		{
+			Value value = getAttributeValue(temp, this->attrIndex, this->attrs);
+			if (value.type == AttrType::TypeInt)
+				sum += *(int*)value.data;
+			else if (value.type == AttrType::TypeReal)
+				sum += *(float*)value.data;
+			++count;
+		}
+		if (count == 0)
+		{
+#ifdef DEBUG
+			cerr << "The number of tuples is 0 when calculating AVG" << endl;
+#endif
+			return -1;
+		}
+		double result = sum / count;
+		if (this->aggAttr.type == AttrType::TypeInt)
+		{
+			int value = (int)result;
+			memcpy((char*)data + 1, &value, sizeof(int));
+		}
+		else if (this->aggAttr.type == AttrType::TypeReal)
+		{
+			float value = (float)result;
+			memcpy((char*)data + 1, &value, sizeof(float));
+		}
+		free(temp);
+		break;
+	case AggregateOp::COUNT:
+		char* temp = (char*)malloc(PAGE_SIZE);
+		int count = 0;
+		while (this->input->getNextTuple(temp))
+			++count;
+		memcpy((char*)data + 1, &count, sizeof(float));
+		free(temp);
+		break;
+	case AggregateOp::MAX:
+		char* temp = (char*)malloc(PAGE_SIZE);
+		int maxInt = numeric_limits<int>::max();
+		float maxFloat = numeric_limits<float>::max();
+		while (this->input->getNextTuple(temp))
+		{
+			Value value = getAttributeValue(temp, this->attrIndex, this->attrs);
+			if (value.type == AttrType::TypeInt)
+				maxInt = *(int*)value.data > maxInt ? *(int*)value.data : maxInt;
+			else if (value.type == AttrType::TypeReal)
+				maxFloat = *(int*)value.data > maxFloat ? *(int*)value.data : maxFloat;
+		}
+		if (this->aggAttr.type == AttrType::TypeInt)
+			memcpy((char*)data + 1, &maxInt, sizeof(int));
+		else if (this->aggAttr.type == AttrType::TypeReal)
+			memcpy((char*)data + 1, &maxFloat, sizeof(float));
+		free(temp);
+		break;
+	case AggregateOp::MIN:
+		char* temp = (char*)malloc(PAGE_SIZE);
+		int minInt = numeric_limits<int>::min();
+		float minFloat = numeric_limits<float>::min();
+		while (this->input->getNextTuple(temp))
+		{
+			Value value = getAttributeValue(temp, this->attrIndex, this->attrs);
+			if (value.type == AttrType::TypeInt)
+				minInt = *(int*)value.data < minInt ? *(int*)value.data : minInt;
+			else if (value.type == AttrType::TypeReal)
+				minFloat = *(int*)value.data < minFloat ? *(int*)value.data : minFloat;
+		}
+		if (this->aggAttr.type == AttrType::TypeInt)
+			memcpy((char*)data + 1, &minInt, sizeof(int));
+		else if (this->aggAttr.type == AttrType::TypeReal)
+			memcpy((char*)data + 1, &minFloat, sizeof(float));
+		free(temp);
+		break;
+	case AggregateOp::SUM:
+		char* temp = (char*)malloc(PAGE_SIZE);
+		double sum = 0;
+		while (this->input->getNextTuple(temp))
+		{
+			Value value = getAttributeValue(temp, this->attrIndex, this->attrs);
+			if (value.type == AttrType::TypeInt)
+				sum += *(int*)value.data;
+			else if (value.type == AttrType::TypeReal)
+				sum += *(float*)value.data;
+		}
+		if (this->aggAttr.type == AttrType::TypeInt)
+		{
+			int value = (int)sum;
+			memcpy((char*)data + 1, &value, sizeof(int));
+		}
+		else if (this->aggAttr.type == AttrType::TypeReal)
+		{
+			float value = (float)sum;
+			memcpy((char*)data + 1, &value, sizeof(float));
+		}
+		free(temp);
+		break;
+	default:
+		break;
+	}
+	return 0;
+}
+
+void Aggregate::getAttributes(vector<Attribute> &attrs) const
+{
+	Attribute attr = this->aggAttr;
+	const string AggregateOpNames[] = { "MIN", "MAX", "COUNT", "SUM", "AVG" };
+	attr.name = AggregateOpNames[op] + "(" + aggAttr.name + ")";
+	attrs.push_back(attr);
 }
