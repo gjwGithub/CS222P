@@ -10,6 +10,8 @@
 
 using namespace std;
 
+class IX_ScanIterator;
+
 // Record ID
 typedef struct
 {

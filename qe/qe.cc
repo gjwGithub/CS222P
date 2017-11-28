@@ -166,7 +166,7 @@ RC Project::getNextTuple(void *data)
 		{
 			unsigned char nullFields = ((unsigned char*)this->buffer)[count / CHAR_BIT];
 			bool isNULL = ((unsigned char*)this->buffer)[count / CHAR_BIT] & (1 << (CHAR_BIT - 1 - count % CHAR_BIT));
-			if (i != this->attrIndexes[count])
+			if ((int)i != this->attrIndexes[count])
 			{
 				if (!isNULL)
 				{
@@ -309,31 +309,31 @@ RC INLJoin::outputJoinResult(void *data)
 		unsigned char nullFields = ((unsigned char*)this->rightBuffer)[i / CHAR_BIT];
 		bool isNULL = this->rightBuffer[i / CHAR_BIT] & (1 << (CHAR_BIT - 1 - i % CHAR_BIT));
 		if (isNULL)
-			nullFields += 1 << (7 - (i + this->leftAttrs.size()) % 8);
+			nullFields += 1 << (7 - (i + this->rightAttrs.size()) % 8);
 		else
 		{
-			nullFields += 0 << (7 - (i + this->leftAttrs.size()) % 8);
+			nullFields += 0 << (7 - (i + this->rightAttrs.size()) % 8);
 			if (rightAttrs[i].type == AttrType::TypeInt)
 			{
-				memcpy((char*)data + offset, leftBuffer + leftOffset, sizeof(int));
+				memcpy((char*)data + offset, rightBuffer + rightOffset, sizeof(int));
 				offset += sizeof(int);
-				leftOffset += sizeof(int);
+				rightOffset += sizeof(int);
 			}
 			else if (rightAttrs[i].type == AttrType::TypeReal)
 			{
-				memcpy((char*)data + offset, leftBuffer + leftOffset, sizeof(float));
+				memcpy((char*)data + offset, rightBuffer + rightOffset, sizeof(float));
 				offset += sizeof(float);
-				leftOffset += sizeof(float);
+				rightOffset += sizeof(float);
 			}
 			else if (rightAttrs[i].type == AttrType::TypeVarChar)
 			{
-				int strLength = *(int*)(leftBuffer + leftOffset);
-				memcpy((char*)data + offset, leftBuffer + leftOffset, sizeof(int) + strLength);
+				int strLength = *(int*)(rightBuffer + rightOffset);
+				memcpy((char*)data + offset, rightBuffer + rightOffset, sizeof(int) + strLength);
 				offset += sizeof(int) + strLength;
-				leftOffset += sizeof(int) + strLength;
+				rightOffset += sizeof(int) + strLength;
 			}
 		}
-		((unsigned char*)data)[(i + this->leftAttrs.size()) / CHAR_BIT] = nullFields;
+		((unsigned char*)data)[(i + this->rightAttrs.size()) / CHAR_BIT] = nullFields;
 	}
 	return 0;
 }
@@ -362,6 +362,7 @@ RC Aggregate::getNextTuple(void *data)
 	switch (this->op)
 	{
 	case AggregateOp::AVG:
+	{
 		char* temp = (char*)malloc(PAGE_SIZE);
 		double sum = 0;
 		int count = 0;
@@ -393,19 +394,23 @@ RC Aggregate::getNextTuple(void *data)
 			memcpy((char*)data + 1, &value, sizeof(float));
 		}
 		free(temp);
-		break;
+	}
+	break;
 	case AggregateOp::COUNT:
+	{
 		char* temp = (char*)malloc(PAGE_SIZE);
 		int count = 0;
 		while (this->input->getNextTuple(temp))
 			++count;
 		memcpy((char*)data + 1, &count, sizeof(float));
 		free(temp);
-		break;
+	}
+	break;
 	case AggregateOp::MAX:
+	{
 		char* temp = (char*)malloc(PAGE_SIZE);
-		int maxInt = numeric_limits<int>::max();
-		float maxFloat = numeric_limits<float>::max();
+		int maxInt = numeric_limits<int>::min();
+		float maxFloat = numeric_limits<float>::min();
 		while (this->input->getNextTuple(temp))
 		{
 			Value value = getAttributeValue(temp, this->attrIndex, this->attrs);
@@ -419,11 +424,13 @@ RC Aggregate::getNextTuple(void *data)
 		else if (this->aggAttr.type == AttrType::TypeReal)
 			memcpy((char*)data + 1, &maxFloat, sizeof(float));
 		free(temp);
-		break;
+	}
+	break;
 	case AggregateOp::MIN:
+	{
 		char* temp = (char*)malloc(PAGE_SIZE);
-		int minInt = numeric_limits<int>::min();
-		float minFloat = numeric_limits<float>::min();
+		int minInt = numeric_limits<int>::max();
+		float minFloat = numeric_limits<float>::max();
 		while (this->input->getNextTuple(temp))
 		{
 			Value value = getAttributeValue(temp, this->attrIndex, this->attrs);
@@ -437,8 +444,10 @@ RC Aggregate::getNextTuple(void *data)
 		else if (this->aggAttr.type == AttrType::TypeReal)
 			memcpy((char*)data + 1, &minFloat, sizeof(float));
 		free(temp);
-		break;
+	}
+	break;
 	case AggregateOp::SUM:
+	{
 		char* temp = (char*)malloc(PAGE_SIZE);
 		double sum = 0;
 		while (this->input->getNextTuple(temp))
@@ -460,7 +469,8 @@ RC Aggregate::getNextTuple(void *data)
 			memcpy((char*)data + 1, &value, sizeof(float));
 		}
 		free(temp);
-		break;
+	}
+	break;
 	default:
 		break;
 	}

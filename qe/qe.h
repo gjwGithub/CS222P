@@ -2,6 +2,7 @@
 #define _qe_h_
 
 #include <vector>
+#include <limits>
 
 #include "../rbf/rbfm.h"
 #include "../rm/rm.h"
