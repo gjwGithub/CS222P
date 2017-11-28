@@ -16,12 +16,12 @@
 #define InternalNodeType 1
 #define LeafNodeType 2
 
-class IX_ScanIterator;
 class IXFileHandle;
 class BTree;
 class Node;
 class LeafEntry;
 class LeafNode;
+class IX_ScanIterator;
 class IndexManager {
 
 public:

@@ -1346,6 +1346,7 @@ RC RelationManager::createIndex(const string &tableName, const string &attribute
 #endif
 		return -1;
 	}
+	this->map_hasIndex[indexFileName] = true;
 
 	//Find the table ID
 	int tableID = getTableID(tableName);
@@ -1478,11 +1479,11 @@ RC RelationManager::destroyIndex(const string &tableName, const string &attribut
 #endif
 		return -1;
 	}
+	this->map_hasIndex[indexFileName] = false;
 
 	//Find the table ID
 	int tableID = getTableID(tableName);
 	//Change the value of hasIndex in Column table
-	int keyLength;
 	Attribute keyAttribute;
 	vector<string> attribute1;
 	attribute1.push_back("column-name");
@@ -1529,7 +1530,6 @@ RC RelationManager::destroyIndex(const string &tableName, const string &attribut
 
 		if (stringfieldName == attributeName)
 		{
-			keyLength = maxLength;
 			keyAttribute = attr1;
 			hasIndex = 0;
 
@@ -1638,7 +1638,7 @@ RC RelationManager::indexScan(const string &tableName,
 		return -1;
 	}
 
-	if (IndexManager::instance()->scan(ixfileHandle, keyAttribute, lowKey, highKey, lowKeyInclusive, highKeyInclusive, rm_IndexScanIterator.ixScanIterator) == -1)
+	if (IndexManager::instance()->scan(ixfileHandle, keyAttribute, lowKey, highKey, lowKeyInclusive, highKeyInclusive, *rm_IndexScanIterator.ixScanIterator) == -1)
 	{
 #ifdef DEBUG
 		cerr << "Cannot scan the index file while scanning" << endl;
@@ -1647,4 +1647,24 @@ RC RelationManager::indexScan(const string &tableName,
 	}
 
 	return 0;
+}
+
+RM_IndexScanIterator::RM_IndexScanIterator()
+{
+	this->ixScanIterator = new IX_ScanIterator();
+}
+
+RM_IndexScanIterator::~RM_IndexScanIterator()
+{
+	delete this->ixScanIterator;
+}
+
+RC RM_IndexScanIterator::getNextEntry(RID &rid, void *key)
+{ 
+	return this->ixScanIterator->getNextEntry(rid, key); 
+}
+
+RC RM_IndexScanIterator::close()
+{ 
+	return this->ixScanIterator->close(); 
 }
