@@ -31,7 +31,7 @@ public:
 	~RM_IndexScanIterator() {}; 	// Destructor
 
 									// "key" follows the same format as in IndexManager::insertEntry()
-	RC getNextEntry(RID &rid, void *key) { return ixScanIterator.getNextEntry(rid, data); };  	// Get next matching entry
+	RC getNextEntry(RID &rid, void *key) { return ixScanIterator.getNextEntry(rid, key); };  	// Get next matching entry
 	RC close() { return ixScanIterator.close(); };             			// Terminate index scan
 
 public:

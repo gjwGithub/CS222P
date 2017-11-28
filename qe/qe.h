@@ -216,6 +216,13 @@ class Project : public Iterator {
         void getAttributes(vector<Attribute> &attrs) const{};
 };
 
+class Tuple{
+public:
+    void *data;
+    int length;
+    Tuple(void *data,int length);
+};
+
 class BNLJoin : public Iterator {
     // Block nested-loop join operator
     public:
@@ -224,14 +231,29 @@ class BNLJoin : public Iterator {
                const Condition &condition,   // Join condition
                const unsigned numPages       // # of pages that can be loaded into memory,
 			                                 //   i.e., memory block size (decided by the optimizer)
-        ){};
+        );
         ~BNLJoin(){};
-
-        RC getNextTuple(void *data){return QE_EOF;};
+        int sum_buffer=0;
+        vector<Tuple> outers;
+        int outer_index = 0;
+        vector<Tuple> inners;
+        int inner_index = 0;
+        Iterator *leftIn;
+        TableScan *rightIn;
+        Condition condition;
+        unsigned numPages;
+        vector<Attribute> attrs_out;
+        vector<Attribute> attrs_in;
+        RC getNextTuple(void *data);
         // For attribute in vector<Attribute>, name it as rel.attr
-        void getAttributes(vector<Attribute> &attrs) const{};
+        void getAttributes(vector<Attribute> &attrs) const;
+        RC getByteLength(vector<Attribute> attrs,void *data,int &size);
+        RC updateVectorOuter();
+        RC updateVectorInner();
+        RC find_r_value(int &attrtype,int &value_int,float &value_float,string &value_string,int attr_index);
+        RC find_s_value(int &attrtype,int &value_int,float &value_float,string &value_string,int inner_index,int attr_index);
+        RC getJoin(void *data,void *r_data,int outer_length,void *s_data,int inner_length);
 };
-
 
 class INLJoin : public Iterator {
     // Index nested-loop join operator
