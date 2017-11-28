@@ -1,4 +1,3 @@
-
 #ifndef _rm_h_
 #define _rm_h_
 
