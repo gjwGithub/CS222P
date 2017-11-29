@@ -163,25 +163,28 @@ RC Project::getNextTuple(void *data)
 	this->end = input->getNextTuple(this->buffer);
 	if (!this->end)
 	{
-		int nullIndicatorSize = ceil((double)this->attrs.size() / CHAR_BIT);
-		int offset = nullIndicatorSize;
+		int dataNullIndicatorSize = ceil((double)this->attrs.size() / CHAR_BIT);
+		int dataOffset = dataNullIndicatorSize;
+		int bufferNullIndicatorSize = ceil((double)this->totalAttrsCount / CHAR_BIT);
+		int bufferOffset = bufferNullIndicatorSize;
 		int count = 0;
-		for (size_t i = 0; i < totalAttrsCount; i++, count++)
+		memset(data, 0, dataNullIndicatorSize);
+		for (size_t i = 0; i < this->totalAttrsCount; i++)
 		{
-			unsigned char nullFields = ((unsigned char*)this->buffer)[count / CHAR_BIT];
+			unsigned char nullFields = ((unsigned char*)data)[count / CHAR_BIT];
 			bool isNULL = ((unsigned char*)this->buffer)[count / CHAR_BIT] & (1 << (CHAR_BIT - 1 - count % CHAR_BIT));
 			if ((int)i != this->attrIndexes[count])
 			{
 				if (!isNULL)
 				{
 					if (attrs[count].type == AttrType::TypeInt)
-						offset += sizeof(int);
+						bufferOffset += sizeof(int);
 					else if (attrs[count].type == AttrType::TypeReal)
-						offset += sizeof(float);
+						bufferOffset += sizeof(float);
 					else if (attrs[count].type == AttrType::TypeVarChar)
 					{
-						int strLength = *(int*)(this->buffer + offset);
-						offset += sizeof(int) + strLength;
+						int strLength = *(int*)(this->buffer + bufferOffset);
+						bufferOffset += sizeof(int) + strLength;
 					}
 				}
 				continue;
@@ -189,28 +192,32 @@ RC Project::getNextTuple(void *data)
 			else
 			{
 				if (isNULL)
-					nullFields += 1 << (7 - count % 8);
+					nullFields += 1 << (CHAR_BIT - 1 - count % CHAR_BIT);
 				else
 				{
-					nullFields += 0 << (7 - count % 8);
+					nullFields += 0 << (CHAR_BIT - 1 - count % CHAR_BIT);
 					if (attrs[count].type == AttrType::TypeInt)
 					{
-						memcpy((char*)data + offset, this->buffer + offset, sizeof(int));
-						offset += sizeof(int);
+						memcpy((char*)data + dataOffset, this->buffer + bufferOffset, sizeof(int));
+						dataOffset += sizeof(int);
+						bufferOffset += sizeof(int);
 					}
 					else if (attrs[count].type == AttrType::TypeReal)
 					{
-						memcpy((char*)data + offset, this->buffer + offset, sizeof(float));
-						offset += sizeof(float);
+						memcpy((char*)data + dataOffset, this->buffer + bufferOffset, sizeof(float));
+						dataOffset += sizeof(float);
+						bufferOffset += sizeof(float);
 					}
 					else if (attrs[count].type == AttrType::TypeVarChar)
 					{
-						int strLength = *(int*)(this->buffer + offset);
-						memcpy((char*)data + offset, this->buffer + offset, sizeof(int) + strLength);
-						offset += sizeof(int) + strLength;
+						int strLength = *(int*)(this->buffer + bufferOffset);
+						memcpy((char*)data + dataOffset, this->buffer + bufferOffset, sizeof(int) + strLength);
+						dataOffset += sizeof(int) + strLength;
+						bufferOffset += sizeof(int) + strLength;
 					}
 				}
 				((unsigned char*)data)[count / CHAR_BIT] = nullFields;
+				++count;
 			}
 		}
 		return 0;
@@ -513,9 +520,7 @@ INLJoin::INLJoin(Iterator *leftIn,           // Iterator of input R
 	this->rightIndex = getAttrIndex(this->rightAttrs, this->condition.rhsAttr);
 
 	if (this->leftIn->getNextTuple(this->leftBuffer) == QE_EOF)
-	{
 		this->end = true;
-	}
 	else
 	{
 		Value leftValue = getAttributeValue(this->leftBuffer, this->leftIndex, this->leftAttrs);
@@ -547,6 +552,7 @@ RC INLJoin::readFromRight(IndexScan* rightScan, void * data)
 RC INLJoin::outputJoinResult(void *data)
 {
 	int nullIndicatorSize = ceil((double)(this->leftAttrs.size() + this->rightAttrs.size()) / CHAR_BIT);
+	memset(data, 0, nullIndicatorSize);
 	int offset = nullIndicatorSize;
 	//Copy left attributes
 	int leftOffset = ceil((double)this->leftAttrs.size() / CHAR_BIT);
@@ -555,10 +561,10 @@ RC INLJoin::outputJoinResult(void *data)
 		unsigned char nullFields = ((unsigned char*)data)[i / CHAR_BIT];
 		bool isNULL = this->leftBuffer[i / CHAR_BIT] & (1 << (CHAR_BIT - 1 - i % CHAR_BIT));
 		if (isNULL)
-			nullFields |= 1 << (CHAR_BIT - 1 - i % CHAR_BIT);
+			nullFields += 1 << (CHAR_BIT - 1 - i % CHAR_BIT);
 		else
 		{
-			nullFields |= 0 << (CHAR_BIT - 1 - i % CHAR_BIT);
+			nullFields += 0 << (CHAR_BIT - 1 - i % CHAR_BIT);
 			if (leftAttrs[i].type == AttrType::TypeInt)
 			{
 				memcpy((char*)data + offset, leftBuffer + leftOffset, sizeof(int));
@@ -585,13 +591,13 @@ RC INLJoin::outputJoinResult(void *data)
 	int rightOffset = ceil((double)this->rightAttrs.size() / CHAR_BIT);
 	for (size_t i = 0; i < this->rightAttrs.size(); i++)
 	{
-		unsigned char nullFields = ((unsigned char*)data)[(i + this->rightAttrs.size()) / CHAR_BIT];
+		unsigned char nullFields = ((unsigned char*)data)[(i + this->leftAttrs.size()) / CHAR_BIT];
 		bool isNULL = this->rightBuffer[i / CHAR_BIT] & (1 << (CHAR_BIT - 1 - i % CHAR_BIT));
 		if (isNULL)
-			nullFields |= 1 << (CHAR_BIT - 1 - (i + this->rightAttrs.size()) % CHAR_BIT);
+			nullFields += 1 << (CHAR_BIT - 1 - (i + this->leftAttrs.size()) % CHAR_BIT);
 		else
 		{
-			nullFields |= 0 << (CHAR_BIT - 1 - (i + this->rightAttrs.size()) % CHAR_BIT);
+			nullFields += 0 << (CHAR_BIT - 1 - (i + this->leftAttrs.size()) % CHAR_BIT);
 			if (rightAttrs[i].type == AttrType::TypeInt)
 			{
 				memcpy((char*)data + offset, rightBuffer + rightOffset, sizeof(int));
@@ -612,7 +618,7 @@ RC INLJoin::outputJoinResult(void *data)
 				rightOffset += sizeof(int) + strLength;
 			}
 		}
-		((unsigned char*)data)[(i + this->rightAttrs.size()) / CHAR_BIT] = nullFields;
+		((unsigned char*)data)[(i + this->leftAttrs.size()) / CHAR_BIT] = nullFields;
 	}
 	return 0;
 }

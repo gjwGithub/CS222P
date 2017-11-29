@@ -76,7 +76,7 @@ public:
 	  free(value);
 	  currentPageNum = 0;
 	  currentSlotNum = -1;
-	  maxPageNum = 0;
+	  maxPageNum = -1;
 	  end = true; 
 	  versionTable.clear();
 	  attributeNames.clear();

@@ -683,8 +683,8 @@ RC RelationManager::scan(const string &tableName,
 	else {
 		vector<Attribute> attrs;
 		getAttributes(tableName, attrs);
-		fm_table->openFile(tableName, fh_table);
-		fm_table->scan(fh_table, attrs, conditionAttribute, compOp, value, attributeNames, rm_ScanIterator.rbfm_ScanIterator);
+		fm_table->openFile(tableName, rm_ScanIterator.fileHandle);
+		fm_table->scan(rm_ScanIterator.fileHandle, attrs, conditionAttribute, compOp, value, attributeNames, rm_ScanIterator.rbfm_ScanIterator);
 
 		//fm_table->closeFile(fh_table);
 	}
@@ -1446,7 +1446,7 @@ RC RelationManager::createIndex(const string &tableName, const string &attribute
 	vector<string> attributeNameVec;
 	attributeNameVec.push_back(attributeName);
 	scan(tableName, "", NO_OP, NULL, attributeNameVec, rmsi);
-	void *key = malloc(keyLength);
+	void *key = malloc(keyLength + 1); //The key contains the nullIndicator
 	IXFileHandle ixfileHandle;
 	if (IndexManager::instance()->openFile(indexFileName, ixfileHandle) == -1)
 	{
@@ -1457,7 +1457,7 @@ RC RelationManager::createIndex(const string &tableName, const string &attribute
 	}
 	while (rmsi.getNextTuple(rid, key) != RM_EOF)
 	{
-		if (IndexManager::instance()->insertEntry(ixfileHandle, keyAttribute, key, rid) == -1)
+		if (IndexManager::instance()->insertEntry(ixfileHandle, keyAttribute, (char*)key + 1, rid) == -1) //Ignore the nullIndicator in key
 		{
 #ifdef DEBUG
 			cerr << "Cannot insert entry while creating index, RID = " << rid.pageNum << ", " << rid.slotNum << endl;
@@ -1659,7 +1659,6 @@ RC RelationManager::indexScan(const string &tableName,
 #endif
 		return -1;
 	}
-
 	if (IndexManager::instance()->scan(ixfileHandle, keyAttribute, lowKey, highKey, lowKeyInclusive, highKeyInclusive, *rm_IndexScanIterator.ixScanIterator) == -1)
 	{
 #ifdef DEBUG

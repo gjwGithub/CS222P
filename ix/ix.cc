@@ -848,7 +848,17 @@ RC IX_ScanIterator::getNextEntry(RID &rid, void *key)
 
 RC IX_ScanIterator::close()
 {
+	this->attrType = AttrType::TypeInt;
+	this->currentNode = NULL;
+	this->previousIndex = -1;
+	this->previousRID = RID();
+	this->ixfileHandle = NULL;
+	this->lowKey = NULL;
+	this->highKey = NULL;
+	this->lowKeyInclusive = false;
+	this->highKeyInclusive = false;
 	this->end = true;
+	this->tree = NULL;
 	return 0;
 }
 
