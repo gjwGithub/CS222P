@@ -552,13 +552,13 @@ RC INLJoin::outputJoinResult(void *data)
 	int leftOffset = ceil((double)this->leftAttrs.size() / CHAR_BIT);
 	for (size_t i = 0; i < this->leftAttrs.size(); i++)
 	{
-		unsigned char nullFields = ((unsigned char*)this->leftBuffer)[i / CHAR_BIT];
+		unsigned char nullFields = ((unsigned char*)data)[i / CHAR_BIT];
 		bool isNULL = this->leftBuffer[i / CHAR_BIT] & (1 << (CHAR_BIT - 1 - i % CHAR_BIT));
 		if (isNULL)
-			nullFields += 1 << (7 - i % 8);
+			nullFields |= 1 << (CHAR_BIT - 1 - i % CHAR_BIT);
 		else
 		{
-			nullFields += 0 << (7 - i % 8);
+			nullFields |= 0 << (CHAR_BIT - 1 - i % CHAR_BIT);
 			if (leftAttrs[i].type == AttrType::TypeInt)
 			{
 				memcpy((char*)data + offset, leftBuffer + leftOffset, sizeof(int));
@@ -585,13 +585,13 @@ RC INLJoin::outputJoinResult(void *data)
 	int rightOffset = ceil((double)this->rightAttrs.size() / CHAR_BIT);
 	for (size_t i = 0; i < this->rightAttrs.size(); i++)
 	{
-		unsigned char nullFields = ((unsigned char*)this->rightBuffer)[i / CHAR_BIT];
+		unsigned char nullFields = ((unsigned char*)data)[(i + this->rightAttrs.size()) / CHAR_BIT];
 		bool isNULL = this->rightBuffer[i / CHAR_BIT] & (1 << (CHAR_BIT - 1 - i % CHAR_BIT));
 		if (isNULL)
-			nullFields += 1 << (7 - (i + this->rightAttrs.size()) % 8);
+			nullFields |= 1 << (CHAR_BIT - 1 - (i + this->rightAttrs.size()) % CHAR_BIT);
 		else
 		{
-			nullFields += 0 << (7 - (i + this->rightAttrs.size()) % 8);
+			nullFields |= 0 << (CHAR_BIT - 1 - (i + this->rightAttrs.size()) % CHAR_BIT);
 			if (rightAttrs[i].type == AttrType::TypeInt)
 			{
 				memcpy((char*)data + offset, rightBuffer + rightOffset, sizeof(int));
