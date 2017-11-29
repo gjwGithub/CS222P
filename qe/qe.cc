@@ -12,15 +12,20 @@ int getAttrIndex(const vector<Attribute> &attrs, const string &attr)
 
 Value getAttributeValue(const void* data, const int index, const vector<Attribute> &attrs)
 {
-	int offset = 0;
+	int offset = ceil((double)attrs.size() / CHAR_BIT);
 	for (int i = 0; i < index; i++)
 	{
-		if (attrs[i].type == AttrType::TypeInt)
-			offset += sizeof(int);
-		else if (attrs[i].type == AttrType::TypeReal)
-			offset += sizeof(float);
-		else if (attrs[i].type == AttrType::TypeVarChar)
-			offset += sizeof(int) + *(int*)((char*)data + offset);
+		unsigned char nullFields = ((unsigned char*)data)[i / CHAR_BIT];
+		bool isNULL = ((unsigned char*)data)[i / CHAR_BIT] & (1 << (CHAR_BIT - 1 - i % CHAR_BIT));
+		if (!isNULL)
+		{
+			if (attrs[i].type == AttrType::TypeInt)
+				offset += sizeof(int);
+			else if (attrs[i].type == AttrType::TypeReal)
+				offset += sizeof(float);
+			else if (attrs[i].type == AttrType::TypeVarChar)
+				offset += sizeof(int) + *(int*)((char*)data + offset);
+		}
 	}
 	Value result;
 	result.data = (char*)data + offset;
@@ -158,7 +163,7 @@ RC Project::getNextTuple(void *data)
 	this->end = input->getNextTuple(this->buffer);
 	if (!this->end)
 	{
-		int nullIndicatorSize = ceil(this->attrs.size() / CHAR_BIT);
+		int nullIndicatorSize = ceil((double)this->attrs.size() / CHAR_BIT);
 		int offset = nullIndicatorSize;
 		int count = 0;
 		for (size_t i = 0; i < totalAttrsCount; i++, count++)
@@ -541,10 +546,10 @@ RC INLJoin::readFromRight(IndexScan* rightScan, void * data)
 
 RC INLJoin::outputJoinResult(void *data)
 {
-	int nullIndicatorSize = ceil((this->leftAttrs.size() + this->rightAttrs.size()) / CHAR_BIT);
+	int nullIndicatorSize = ceil((double)(this->leftAttrs.size() + this->rightAttrs.size()) / CHAR_BIT);
 	int offset = nullIndicatorSize;
 	//Copy left attributes
-	int leftOffset = ceil(this->leftAttrs.size() / CHAR_BIT);
+	int leftOffset = ceil((double)this->leftAttrs.size() / CHAR_BIT);
 	for (size_t i = 0; i < this->leftAttrs.size(); i++)
 	{
 		unsigned char nullFields = ((unsigned char*)this->leftBuffer)[i / CHAR_BIT];
@@ -577,7 +582,7 @@ RC INLJoin::outputJoinResult(void *data)
 		((unsigned char*)data)[i / CHAR_BIT] = nullFields;
 	}
 	//Copy right attributes
-	int rightOffset = ceil(this->rightAttrs.size() / CHAR_BIT);
+	int rightOffset = ceil((double)this->rightAttrs.size() / CHAR_BIT);
 	for (size_t i = 0; i < this->rightAttrs.size(); i++)
 	{
 		unsigned char nullFields = ((unsigned char*)this->rightBuffer)[i / CHAR_BIT];
