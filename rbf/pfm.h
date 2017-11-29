@@ -7,7 +7,7 @@ typedef char byte;
 typedef short OffsetType;
 typedef unsigned char MarkType;
 
-//#define DEBUG
+#define DEBUG
 
 #define NULLFIELD -1
 #define DELETEDSLOT -1

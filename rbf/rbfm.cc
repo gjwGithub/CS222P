@@ -1178,7 +1178,7 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 {
 	if (!end)
 	{
-		for (PageNum i = currentPageNum; i <= maxPageNum; i++)
+		for (int i = currentPageNum; i <= maxPageNum; i++)
 		{
 			char* pageData = (char*)malloc(PAGE_SIZE);
 			RC status = fileHandle->readPage(i, pageData);

@@ -498,21 +498,21 @@ RC RelationManager::deleteTuple(const string &tableName, const RID &rid)
 			if (IndexManager::instance()->openFile(indexFileName, ixfileHandle) == -1)
 			{
 #ifdef DEBUG
-				cerr << "Cannot open the index file while inserting tuple" << endl;
+				cerr << "Cannot open the index file while deleting tuple" << endl;
 #endif
 				return -1;
 			}
 			if (IndexManager::instance()->deleteEntry(ixfileHandle, i, (char*)data + offset, rid) == -1)
 			{
 #ifdef DEBUG
-				cerr << "Cannot insert entry while inserting tuple, RID = " << rid.pageNum << ", " << rid.slotNum << endl;
+				cerr << "Cannot insert entry while deleting tuple, RID = " << rid.pageNum << ", " << rid.slotNum << endl;
 #endif
 				return -1;
 			}
 			if (IndexManager::instance()->closeFile(ixfileHandle) == -1)
 			{
 #ifdef DEBUG
-				cerr << "Cannot close the index file while inserting tuple" << endl;
+				cerr << "Cannot close the index file while deleting tuple" << endl;
 #endif
 				return -1;
 			}
@@ -666,6 +666,11 @@ RC RelationManager::scan(const string &tableName,
 		attrs1.push_back(attr1);
 
 		attr1.name = "endVersion";
+		attr1.type = TypeInt;
+		attr1.length = (AttrLength)4;
+		attrs1.push_back(attr1);
+
+		attr1.name = "hasIndex";
 		attr1.type = TypeInt;
 		attr1.length = (AttrLength)4;
 		attrs1.push_back(attr1);
@@ -1170,6 +1175,11 @@ vector<vector<Attribute>> RelationManager::generateVersionTable(const string &ta
 		attr1.length = (AttrLength)4;
 		attrs1.push_back(attr1);
 
+		attr1.name = "hasIndex";
+		attr1.type = TypeInt;
+		attr1.length = (AttrLength)4;
+		attrs1.push_back(attr1);
+
 		result.push_back(attrs1);
 
 		map_versionTable.insert(pair<string, vector<vector<Attribute>>>(tableName, result));
@@ -1312,7 +1322,6 @@ bool RelationManager::hasIndex(const string &tableName, const string &attributeN
 			string stringfieldName = fieldName;
 			int hasIndex = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
 			offset += sizeof(int);
-
 			if (stringfieldName == attributeName)
 			{
 				this->map_hasIndex[indexFileName] = hasIndex;
@@ -1436,7 +1445,7 @@ RC RelationManager::createIndex(const string &tableName, const string &attribute
 	//Insert all record keys and RIDs into index file
 	vector<string> attributeNameVec;
 	attributeNameVec.push_back(attributeName);
-	scan(tableName, NULL, NO_OP, NULL, attributeNameVec, rmsi);
+	scan(tableName, "", NO_OP, NULL, attributeNameVec, rmsi);
 	void *key = malloc(keyLength);
 	IXFileHandle ixfileHandle;
 	if (IndexManager::instance()->openFile(indexFileName, ixfileHandle) == -1)
@@ -1464,7 +1473,20 @@ RC RelationManager::createIndex(const string &tableName, const string &attribute
 #endif
 		return -1;
 	}
-
+	if (fm_table->closeFile(fh_table) == -1)
+	{
+#ifdef DEBUG
+		cerr << "Cannot close the table file while creating index" << endl;
+#endif
+		return -1;
+	}
+	if (rmsi.close() == -1)
+	{
+#ifdef DEBUG
+		cerr << "Cannot close the scan iterator while creating index" << endl;
+#endif
+		return -1;
+	}
 	return 0;
 }
 
