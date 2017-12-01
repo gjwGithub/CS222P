@@ -1440,11 +1440,17 @@ RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
 						((InternalNode*)*new_parentNode)->pageNum = ixfileHandle.ixAppendPageCounter - 1;
 						//update the news;
 						for (size_t i = 0; i < ((InternalNode*)*new_parentNode)->internalEntries.size(); i++) {
+							if ((*(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild))->isLoaded == false) {
+								loadNode(ixfileHandle, ((InternalNode*)*new_parentNode)->internalEntries[i].leftChild);
+							}
 							(*(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild))->parentPointer = new_parentNode;
 							void* datal = generatePage(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild);
 							int leftpage = (*(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild))->pageNum;
 							ixfileHandle.writePage(leftpage, datal);
 							free(datal);
+							if ((*(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild))->isLoaded == false) {
+								loadNode(ixfileHandle, ((InternalNode*)*new_parentNode)->internalEntries[i].rightChild);
+							}
 							(*(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild))->parentPointer = new_parentNode;
 							void* datar = generatePage(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild);
 							int rightpage = (*(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild))->pageNum;
@@ -1484,11 +1490,17 @@ RC BTree::insertEntry(IXFileHandle &ixfileHandle, const LeafEntry &pair) {
 						free(new_newLeafpage);
 						//update the new parent entry's parentpointer
 						for (size_t i = 0; i < ((InternalNode*)*new_parentNode)->internalEntries.size(); i++) {
+							if ((*(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild))->isLoaded == false) {
+								loadNode(ixfileHandle, ((InternalNode*)*new_parentNode)->internalEntries[i].leftChild);
+							}
 							(*(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild))->parentPointer = new_parentNode;
 							void* datal = generatePage(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild);
 							int leftpage = (*(((InternalNode*)*new_parentNode)->internalEntries[i].leftChild))->pageNum;
 							ixfileHandle.writePage(leftpage, datal);
 							free(datal);
+							if ((*(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild))->isLoaded == false) {
+								loadNode(ixfileHandle, ((InternalNode*)*new_parentNode)->internalEntries[i].rightChild);
+							}
 							(*(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild))->parentPointer = new_parentNode;
 							void* datar = generatePage(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild);
 							int rightpage = (*(((InternalNode*)*new_parentNode)->internalEntries[i].rightChild))->pageNum;
@@ -2763,7 +2775,7 @@ Node** BTree::generateNode(char* data)
 		{
 			OffsetType slotOffset;
 			memcpy(&slotOffset, data + PAGE_SIZE - sizeof(OffsetType) * (i + 2), sizeof(OffsetType));
-			InternalEntry entry(this->attrType, data);
+			InternalEntry entry(this->attrType, data + slotOffset);
 			OffsetType keyLength = 0;
 			if (this->attrType == AttrType::TypeInt)
 			{
