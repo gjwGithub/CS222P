@@ -48,7 +48,7 @@ bool compareAttributes(void* v1, void* v2, CompOp op, AttrType type)
 		else if (op == CompOp::LE_OP)
 			return a <= b;
 		else if (op == CompOp::LT_OP)
-			return a >= b;
+			return a < b;
 		else if (op == CompOp::NE_OP)
 			return a != b;
 		else
@@ -67,7 +67,7 @@ bool compareAttributes(void* v1, void* v2, CompOp op, AttrType type)
 		else if (op == CompOp::LE_OP)
 			return a <= b;
 		else if (op == CompOp::LT_OP)
-			return a >= b;
+			return a < b;
 		else if (op == CompOp::NE_OP)
 			return a != b;
 		else
@@ -88,7 +88,7 @@ bool compareAttributes(void* v1, void* v2, CompOp op, AttrType type)
 		else if (op == CompOp::LE_OP)
 			return a <= b;
 		else if (op == CompOp::LT_OP)
-			return a >= b;
+			return a < b;
 		else if (op == CompOp::NE_OP)
 			return a != b;
 		else
@@ -371,7 +371,7 @@ RC BNLJoin::find_s_value(int &attrtype, int &value_int, float &value_float, stri
 				if (i == attr_index) {
 					attrtype = 3;
 					char *value_char = (char *)malloc(string_size + 1);
-					memcpy(value_char, (char *)outers[outer_index].data + offset - string_size, string_size);
+					memcpy(value_char, (char *)inners[inner_index].data + offset - string_size, string_size);
 					value_char[string_size] = '\0';
 					value_string = value_char;
 					break;
@@ -639,10 +639,13 @@ Aggregate::Aggregate(Iterator *input,          // Iterator of input R
 	this->op = op;
 	this->input->getAttributes(this->attrs);
 	this->attrIndex = getAttrIndex(this->attrs, this->aggAttr.name);
+	this->end = false;
 }
 
 RC Aggregate::getNextTuple(void *data)
 {
+	if (this->end)
+		return QE_EOF;
 	((char*)data)[0] = 0;
 	switch (this->op)
 	{
@@ -651,7 +654,7 @@ RC Aggregate::getNextTuple(void *data)
 		char* temp = (char*)malloc(PAGE_SIZE);
 		double sum = 0;
 		int count = 0;
-		while (this->input->getNextTuple(temp))
+		while (this->input->getNextTuple(temp) != QE_EOF)
 		{
 			Value value = getAttributeValue(temp, this->attrIndex, this->attrs);
 			if (value.type == AttrType::TypeInt)
@@ -667,25 +670,16 @@ RC Aggregate::getNextTuple(void *data)
 #endif
 			return -1;
 		}
-		double result = sum / count;
-		if (this->aggAttr.type == AttrType::TypeInt)
-		{
-			int value = (int)result;
-			memcpy((char*)data + 1, &value, sizeof(int));
-		}
-		else if (this->aggAttr.type == AttrType::TypeReal)
-		{
-			float value = (float)result;
-			memcpy((char*)data + 1, &value, sizeof(float));
-		}
+		float result = sum / count;
+		memcpy((char*)data + 1, &result, sizeof(float));
 		free(temp);
 	}
 	break;
 	case AggregateOp::COUNT:
 	{
 		char* temp = (char*)malloc(PAGE_SIZE);
-		int count = 0;
-		while (this->input->getNextTuple(temp))
+		float count = 0;
+		while (this->input->getNextTuple(temp) != QE_EOF)
 			++count;
 		memcpy((char*)data + 1, &count, sizeof(float));
 		free(temp);
@@ -694,71 +688,55 @@ RC Aggregate::getNextTuple(void *data)
 	case AggregateOp::MAX:
 	{
 		char* temp = (char*)malloc(PAGE_SIZE);
-		int maxInt = numeric_limits<int>::min();
-		float maxFloat = numeric_limits<float>::min();
-		while (this->input->getNextTuple(temp))
+		float max = numeric_limits<float>::min();
+		while (this->input->getNextTuple(temp) != QE_EOF)
 		{
 			Value value = getAttributeValue(temp, this->attrIndex, this->attrs);
 			if (value.type == AttrType::TypeInt)
-				maxInt = *(int*)value.data > maxInt ? *(int*)value.data : maxInt;
+				max = (float)*(int*)value.data > max ? (float)*(int*)value.data : max;
 			else if (value.type == AttrType::TypeReal)
-				maxFloat = *(int*)value.data > maxFloat ? *(int*)value.data : maxFloat;
+				max = *(float*)value.data > max ? *(float*)value.data : max;
 		}
-		if (this->aggAttr.type == AttrType::TypeInt)
-			memcpy((char*)data + 1, &maxInt, sizeof(int));
-		else if (this->aggAttr.type == AttrType::TypeReal)
-			memcpy((char*)data + 1, &maxFloat, sizeof(float));
+		memcpy((char*)data + 1, &max, sizeof(float));
 		free(temp);
 	}
 	break;
 	case AggregateOp::MIN:
 	{
 		char* temp = (char*)malloc(PAGE_SIZE);
-		int minInt = numeric_limits<int>::max();
-		float minFloat = numeric_limits<float>::max();
-		while (this->input->getNextTuple(temp))
+		float min = numeric_limits<float>::max();
+		while (this->input->getNextTuple(temp) != QE_EOF)
 		{
 			Value value = getAttributeValue(temp, this->attrIndex, this->attrs);
 			if (value.type == AttrType::TypeInt)
-				minInt = *(int*)value.data < minInt ? *(int*)value.data : minInt;
+				min = (float)*(int*)value.data < min ? (float)*(int*)value.data : min;
 			else if (value.type == AttrType::TypeReal)
-				minFloat = *(int*)value.data < minFloat ? *(int*)value.data : minFloat;
+				min = *(float*)value.data < min ? *(float*)value.data : min;
 		}
-		if (this->aggAttr.type == AttrType::TypeInt)
-			memcpy((char*)data + 1, &minInt, sizeof(int));
-		else if (this->aggAttr.type == AttrType::TypeReal)
-			memcpy((char*)data + 1, &minFloat, sizeof(float));
+		memcpy((char*)data + 1, &min, sizeof(float));
 		free(temp);
 	}
 	break;
 	case AggregateOp::SUM:
 	{
 		char* temp = (char*)malloc(PAGE_SIZE);
-		double sum = 0;
-		while (this->input->getNextTuple(temp))
+		float sum = 0;
+		while (this->input->getNextTuple(temp) != QE_EOF)
 		{
 			Value value = getAttributeValue(temp, this->attrIndex, this->attrs);
 			if (value.type == AttrType::TypeInt)
-				sum += *(int*)value.data;
+				sum += (float)*(int*)value.data;
 			else if (value.type == AttrType::TypeReal)
 				sum += *(float*)value.data;
 		}
-		if (this->aggAttr.type == AttrType::TypeInt)
-		{
-			int value = (int)sum;
-			memcpy((char*)data + 1, &value, sizeof(int));
-		}
-		else if (this->aggAttr.type == AttrType::TypeReal)
-		{
-			float value = (float)sum;
-			memcpy((char*)data + 1, &value, sizeof(float));
-		}
+		memcpy((char*)data + 1, &sum, sizeof(float));
 		free(temp);
 	}
 	break;
 	default:
 		break;
 	}
+	this->end = true;
 	return 0;
 }
 

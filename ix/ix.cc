@@ -239,6 +239,7 @@ RC IndexManager::closeFile(IXFileHandle &ixfileHandle)
 		return -1;
 	if (ixfileHandle.tree)
 		delete ixfileHandle.tree;
+	ixfileHandle.tree = NULL;
 	return 0;
 }
 

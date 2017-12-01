@@ -345,6 +345,7 @@ class Aggregate : public Iterator {
 		AggregateOp op;                               // Aggregate operation
 		vector<Attribute> attrs;
 		int attrIndex;
+		bool end;
 };
 
 #endif

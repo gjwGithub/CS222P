@@ -491,19 +491,26 @@ RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const vector<Attri
 		{
 			OffsetType fieldOffset;
 			memcpy(&fieldOffset, pageData + offset + outputFields[i] * sizeof(OffsetType), sizeof(OffsetType));
-			if (outputFields[i] < fieldNum - 1)
+			if (fieldOffset != NULLFIELD)
 			{
-				OffsetType nextFieldOffset;
-				memcpy(&nextFieldOffset, pageData + offset + (outputFields[i] + 1) * sizeof(OffsetType), sizeof(OffsetType));
-				OffsetType dataSize = nextFieldOffset - fieldOffset;
-				memcpy((char*)data + dataOffset, pageData + startOffset + fieldOffset, dataSize);
-				dataOffset += dataSize;
+				if (outputFields[i] < fieldNum - 1)
+				{
+					OffsetType nextFieldOffset;
+					memcpy(&nextFieldOffset, pageData + offset + (outputFields[i] + 1) * sizeof(OffsetType), sizeof(OffsetType));
+					OffsetType dataSize = nextFieldOffset - fieldOffset;
+					memcpy((char*)data + dataOffset, pageData + startOffset + fieldOffset, dataSize);
+					dataOffset += dataSize;
+				}
+				else
+				{
+					OffsetType dataSize = slotSize - fieldOffset;
+					memcpy((char*)data + dataOffset, pageData + startOffset + fieldOffset, dataSize);
+					dataOffset += dataSize;
+				}
 			}
 			else
 			{
-				OffsetType dataSize = slotSize - fieldOffset;
-				memcpy((char*)data + dataOffset, pageData + startOffset + fieldOffset, dataSize);
-				dataOffset += dataSize;
+				nullFields += 1 << (7 - i % 8);
 			}
 		}
 		else
@@ -1194,7 +1201,7 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 			memcpy(&slotCount, pageData + PAGE_SIZE - sizeof(OffsetType), sizeof(OffsetType));
 			OffsetType startSlot = 0;
 			//If in the same page as last time
-			if (i == currentPageNum)
+			if (i == (int)currentPageNum)
 				startSlot = currentSlotNum + 1;
 			for (OffsetType j = startSlot; j < slotCount; j++)
 			{
@@ -1352,6 +1359,7 @@ RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data)
 							}
 							nullFieldsIndicator[k / 8] = nullFields;
 						}
+						//cout << "nullIndicator: " << (int)*nullFieldsIndicator << endl;
 						memcpy((char*)data, nullFieldsIndicator, nullFieldsIndicatorActualSize);
 						currentPageNum = i;
 						currentSlotNum = j;

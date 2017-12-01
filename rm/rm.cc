@@ -9,12 +9,23 @@ RelationManager* RelationManager::instance()
 
 RelationManager::RelationManager()
 {
+	this->ixfileHandle = new IXFileHandle();
 }
 
 RelationManager::~RelationManager()
 {
 	if (fh_table.currentFileName != "")
 		fm_table->closeFile(fh_table);
+	if (this->ixfileHandle->handle.currentFileName != "")
+	{
+		if (IndexManager::instance()->closeFile(*this->ixfileHandle) == -1)
+		{
+#ifdef DEBUG
+			cerr << "Cannot close the index file while ~RelationManager()" << endl;
+#endif
+		}
+	}
+	delete this->ixfileHandle;
 }
 
 RC RelationManager::createCatalog()
@@ -427,40 +438,55 @@ RC RelationManager::insertTuple(const string &tableName, const void *data, RID &
 	if (rel == -1)
 		return -1;
 
-	int offset = 0;
-	for (auto i : attributes)
+	int offset = ceil((double)attributes.size() / CHAR_BIT);
+	for (size_t i = 0; i < attributes.size(); i++)
 	{
-		if (hasIndex(tableName, i.name))
+		bool isNULL = ((char*)data)[i / CHAR_BIT] & (1 << (CHAR_BIT - 1 - i % CHAR_BIT));
+		if (isNULL)
+			continue;
+		if (hasIndex(tableName, attributes[i].name))
 		{
-			string indexFileName = getIndexName(tableName, i.name);
-			IXFileHandle ixfileHandle;
-			if (IndexManager::instance()->openFile(indexFileName, ixfileHandle) == -1)
+			string indexFileName = getIndexName(tableName, attributes[i].name);
+			if (indexFileName != this->ixfileHandle->handle.currentFileName)
 			{
+				if (this->ixfileHandle->handle.currentFileName != "")
+				{
+					if (IndexManager::instance()->closeFile(*this->ixfileHandle) == -1)
+					{
 #ifdef DEBUG
-				cerr << "Cannot open the index file while inserting tuple" << endl;
+						cerr << "Cannot close the index file while inserting tuple" << endl;
 #endif
-				return -1;
+						return -1;
+					}
+				}
+				if (IndexManager::instance()->openFile(indexFileName, *this->ixfileHandle) == -1)
+				{
+#ifdef DEBUG
+					cerr << "Cannot open the index file while inserting tuple" << endl;
+#endif
+					return -1;
+				}
 			}
-			if (IndexManager::instance()->insertEntry(ixfileHandle, i, (char*)data + offset, rid) == -1)
+			if (IndexManager::instance()->insertEntry(*this->ixfileHandle, attributes[i], (char*)data + offset, rid) == -1)
 			{
 #ifdef DEBUG
 				cerr << "Cannot insert entry while inserting tuple, RID = " << rid.pageNum << ", " << rid.slotNum << endl;
 #endif
 				return -1;
 			}
-			if (IndexManager::instance()->closeFile(ixfileHandle) == -1)
+			/*if (IndexManager::instance()->closeFile(ixfileHandle) == -1)
 			{
 #ifdef DEBUG
 				cerr << "Cannot close the index file while inserting tuple" << endl;
 #endif
 				return -1;
-			}
+			}*/
 		}
-		if (i.type == AttrType::TypeInt)
+		if (attributes[i].type == AttrType::TypeInt)
 			offset += sizeof(int);
-		else if (i.type == AttrType::TypeReal)
+		else if (attributes[i].type == AttrType::TypeReal)
 			offset += sizeof(float);
-		else if (i.type == AttrType::TypeVarChar)
+		else if (attributes[i].type == AttrType::TypeVarChar)
 			offset += sizeof(int) + *(int*)((char*)data + offset);
 	}
 	return 0;
@@ -488,34 +514,46 @@ RC RelationManager::deleteTuple(const string &tableName, const RID &rid)
 #endif
 		return -1;
 	}
-	int offset = 0;
+	int offset = ceil((double)attributes.size() / CHAR_BIT);
 	for (auto i : attributes)
 	{
 		if (hasIndex(tableName, i.name))
 		{
 			string indexFileName = getIndexName(tableName, i.name);
-			IXFileHandle ixfileHandle;
-			if (IndexManager::instance()->openFile(indexFileName, ixfileHandle) == -1)
+			if (indexFileName != this->ixfileHandle->handle.currentFileName)
 			{
+				if (this->ixfileHandle->handle.currentFileName != "")
+				{
+					if (IndexManager::instance()->closeFile(*this->ixfileHandle) == -1)
+					{
 #ifdef DEBUG
-				cerr << "Cannot open the index file while deleting tuple" << endl;
+						cerr << "Cannot close the index file while deleting tuple" << endl;
 #endif
-				return -1;
+						return -1;
+					}
+				}
+				if (IndexManager::instance()->openFile(indexFileName, *this->ixfileHandle) == -1)
+				{
+#ifdef DEBUG
+					cerr << "Cannot open the index file while deleting tuple" << endl;
+#endif
+					return -1;
+				}
 			}
-			if (IndexManager::instance()->deleteEntry(ixfileHandle, i, (char*)data + offset, rid) == -1)
+			if (IndexManager::instance()->deleteEntry(*this->ixfileHandle, i, (char*)data + offset, rid) == -1)
 			{
 #ifdef DEBUG
 				cerr << "Cannot insert entry while deleting tuple, RID = " << rid.pageNum << ", " << rid.slotNum << endl;
 #endif
 				return -1;
 			}
-			if (IndexManager::instance()->closeFile(ixfileHandle) == -1)
+			/*if (IndexManager::instance()->closeFile(ixfileHandle) == -1)
 			{
 #ifdef DEBUG
 				cerr << "Cannot close the index file while deleting tuple" << endl;
 #endif
 				return -1;
-			}
+			}*/
 		}
 		if (i.type == AttrType::TypeInt)
 			offset += sizeof(int);
@@ -683,6 +721,22 @@ RC RelationManager::scan(const string &tableName,
 	else {
 		vector<Attribute> attrs;
 		getAttributes(tableName, attrs);
+
+		//Close the table file if we inserted or deleted tuple before
+		if (fh_table.currentFileName != "")
+			fm_table->closeFile(fh_table);
+		//Close the index file if we inserted or deleted tuple before
+		if (this->ixfileHandle->handle.currentFileName != "")
+		{
+			if (IndexManager::instance()->closeFile(*this->ixfileHandle) == -1)
+			{
+#ifdef DEBUG
+				cerr << "Cannot close the previous index file while scanning" << endl;
+#endif
+				return -1;
+			}
+		}
+
 		fm_table->openFile(tableName, rm_ScanIterator.fileHandle);
 		fm_table->scan(rm_ScanIterator.fileHandle, attrs, conditionAttribute, compOp, value, attributeNames, rm_ScanIterator.rbfm_ScanIterator);
 
@@ -1447,17 +1501,29 @@ RC RelationManager::createIndex(const string &tableName, const string &attribute
 	attributeNameVec.push_back(attributeName);
 	scan(tableName, "", NO_OP, NULL, attributeNameVec, rmsi);
 	void *key = malloc(keyLength + 1); //The key contains the nullIndicator
-	IXFileHandle ixfileHandle;
-	if (IndexManager::instance()->openFile(indexFileName, ixfileHandle) == -1)
+	if (indexFileName != this->ixfileHandle->handle.currentFileName)
 	{
+		if (this->ixfileHandle->handle.currentFileName != "")
+		{
+			if (IndexManager::instance()->closeFile(*this->ixfileHandle) == -1)
+			{
 #ifdef DEBUG
-		cerr << "Cannot open the index file while creating index" << endl;
+				cerr << "Cannot close the index file while creating index" << endl;
 #endif
-		return -1;
+				return -1;
+			}
+		}
+		if (IndexManager::instance()->openFile(indexFileName, *this->ixfileHandle) == -1)
+		{
+#ifdef DEBUG
+			cerr << "Cannot open the index file while creating index" << endl;
+#endif
+			return -1;
+		}
 	}
 	while (rmsi.getNextTuple(rid, key) != RM_EOF)
 	{
-		if (IndexManager::instance()->insertEntry(ixfileHandle, keyAttribute, (char*)key + 1, rid) == -1) //Ignore the nullIndicator in key
+		if (IndexManager::instance()->insertEntry(*this->ixfileHandle, keyAttribute, (char*)key + 1, rid) == -1) //Ignore the nullIndicator in key
 		{
 #ifdef DEBUG
 			cerr << "Cannot insert entry while creating index, RID = " << rid.pageNum << ", " << rid.slotNum << endl;
@@ -1466,13 +1532,13 @@ RC RelationManager::createIndex(const string &tableName, const string &attribute
 		}
 	}
 	free(key);
-	if (IndexManager::instance()->closeFile(ixfileHandle) == -1)
-	{
-#ifdef DEBUG
-		cerr << "Cannot close the index file while creating index" << endl;
-#endif
-		return -1;
-	}
+//	if (IndexManager::instance()->closeFile(*this->ixfileHandle) == -1)
+//	{
+//#ifdef DEBUG
+//		cerr << "Cannot close the index file while creating index" << endl;
+//#endif
+//		return -1;
+//	}
 	if (fm_table->closeFile(fh_table) == -1)
 	{
 #ifdef DEBUG
@@ -1494,10 +1560,20 @@ RC RelationManager::destroyIndex(const string &tableName, const string &attribut
 {
 	//Delete index file
 	string indexFileName = getIndexName(tableName, attributeName);
+	if (this->ixfileHandle->handle.currentFileName != "")
+	{
+		if (IndexManager::instance()->closeFile(*this->ixfileHandle) == -1)
+		{
+#ifdef DEBUG
+			cerr << "Cannot close the index file while destroying index" << endl;
+#endif
+			return -1;
+		}
+	}
 	if (IndexManager::instance()->destroyFile(indexFileName) == -1)
 	{
 #ifdef DEBUG
-		cerr << "Cannot create the index file while creating index" << endl;
+		cerr << "Cannot destroy the index file while destroying index" << endl;
 #endif
 		return -1;
 	}
@@ -1597,18 +1673,43 @@ RC RelationManager::indexScan(const string &tableName,
 	RM_IndexScanIterator &rm_IndexScanIterator)
 {
 	string indexFileName = getIndexName(tableName, attributeName);
-	IXFileHandle ixfileHandle;
-	if (IndexManager::instance()->openFile(indexFileName, ixfileHandle) == -1)
+
+	//Close the index file if we inserted or deleted tuple before
+	if (this->ixfileHandle->handle.currentFileName != "")
 	{
+		if (IndexManager::instance()->closeFile(*this->ixfileHandle) == -1)
+		{
 #ifdef DEBUG
-		cerr << "Cannot open the index file while scanning" << endl;
+			cerr << "Cannot close the previous index file while scanning" << endl;
 #endif
-		return -1;
+			return -1;
+		}
 	}
 
+	if (indexFileName != rm_IndexScanIterator.ixfileHandle->handle.currentFileName)
+	{
+		if (rm_IndexScanIterator.ixfileHandle->handle.currentFileName != "")
+		{
+			if (IndexManager::instance()->closeFile(*rm_IndexScanIterator.ixfileHandle) == -1)
+			{
+#ifdef DEBUG
+				cerr << "Cannot close the scanning index file while scanning" << endl;
+#endif
+				return -1;
+			}
+		}
+		if (IndexManager::instance()->openFile(indexFileName, *rm_IndexScanIterator.ixfileHandle) == -1)
+		{
+#ifdef DEBUG
+			cerr << "Cannot open the index file while scanning" << endl;
+#endif
+			return -1;
+		}
+	}
+	
 	//Find the table ID
 	int tableID = getTableID(tableName);
-	//Change the value of hasIndex in Column table
+	//Get the attribute of key from Column table
 	int keyLength = 0;
 	Attribute keyAttribute;
 	vector<string> attribute1;
@@ -1659,7 +1760,7 @@ RC RelationManager::indexScan(const string &tableName,
 #endif
 		return -1;
 	}
-	if (IndexManager::instance()->scan(ixfileHandle, keyAttribute, lowKey, highKey, lowKeyInclusive, highKeyInclusive, *rm_IndexScanIterator.ixScanIterator) == -1)
+	if (IndexManager::instance()->scan(*rm_IndexScanIterator.ixfileHandle, keyAttribute, lowKey, highKey, lowKeyInclusive, highKeyInclusive, *rm_IndexScanIterator.ixScanIterator) == -1)
 	{
 #ifdef DEBUG
 		cerr << "Cannot scan the index file while scanning" << endl;
@@ -1673,11 +1774,13 @@ RC RelationManager::indexScan(const string &tableName,
 RM_IndexScanIterator::RM_IndexScanIterator()
 {
 	this->ixScanIterator = new IX_ScanIterator();
+	this->ixfileHandle = new IXFileHandle();
 }
 
 RM_IndexScanIterator::~RM_IndexScanIterator()
 {
 	delete this->ixScanIterator;
+	delete this->ixfileHandle;
 }
 
 RC RM_IndexScanIterator::getNextEntry(RID &rid, void *key)
@@ -1687,5 +1790,15 @@ RC RM_IndexScanIterator::getNextEntry(RID &rid, void *key)
 
 RC RM_IndexScanIterator::close()
 { 
+	if (this->ixfileHandle->handle.currentFileName != "")
+	{
+		if (IndexManager::instance()->closeFile(*this->ixfileHandle) == -1)
+		{
+#ifdef DEBUG
+			cerr << "Cannot close the scanning index file while closing RM_IndexScanIterator" << endl;
+#endif
+			return -1;
+		}
+	}
 	return this->ixScanIterator->close(); 
 }

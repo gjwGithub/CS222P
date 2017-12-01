@@ -11,6 +11,8 @@ using namespace std;
 
 # define RM_EOF (-1)  // end of a scan operator
 
+class IXFileHandle;
+
 // RM_ScanIterator is an iteratr to go through tuples
 class RM_ScanIterator {
 public:
@@ -36,6 +38,7 @@ public:
 
 public:
 	IX_ScanIterator* ixScanIterator;
+	IXFileHandle* ixfileHandle;
 };
 
 // Relation Manager
@@ -45,6 +48,7 @@ public:
   RecordBasedFileManager *fm_table;
   FileHandle fh_table;
   FileHandle fh_col;
+  IXFileHandle* ixfileHandle;
   unordered_map<string, vector<Attribute>> map_attributes;
   unordered_map<string, vector<vector<Attribute>>> map_versionTable;
   unordered_map<string, bool> map_hasIndex;
