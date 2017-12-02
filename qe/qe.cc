@@ -96,6 +96,11 @@ bool compareAttributes(void* v1, void* v2, CompOp op, AttrType type)
 	}
 }
 
+bool Value::operator<(const Value& rhs) const
+{
+	return (this->type == rhs.type) && compareAttributes(this->data, rhs.data, LT_OP, this->type);
+}
+
 Filter::Filter(Iterator* input, const Condition &condition)
 {
 	this->input = input;
@@ -640,6 +645,7 @@ Aggregate::Aggregate(Iterator *input,          // Iterator of input R
 	this->input->getAttributes(this->attrs);
 	this->attrIndex = getAttrIndex(this->attrs, this->aggAttr.name);
 	this->end = false;
+	this->isGroupby = false;
 }
 
 RC Aggregate::getNextTuple(void *data)
@@ -647,96 +653,139 @@ RC Aggregate::getNextTuple(void *data)
 	if (this->end)
 		return QE_EOF;
 	((char*)data)[0] = 0;
-	switch (this->op)
+	if (!this->isGroupby)
 	{
-	case AggregateOp::AVG:
-	{
-		char* temp = (char*)malloc(PAGE_SIZE);
-		double sum = 0;
-		int count = 0;
-		while (this->input->getNextTuple(temp) != QE_EOF)
+		switch (this->op)
 		{
-			Value value = getAttributeValue(temp, this->attrIndex, this->attrs);
-			if (value.type == AttrType::TypeInt)
-				sum += *(int*)value.data;
-			else if (value.type == AttrType::TypeReal)
-				sum += *(float*)value.data;
-			++count;
-		}
-		if (count == 0)
+		case AggregateOp::AVG:
 		{
+			char* temp = (char*)malloc(PAGE_SIZE);
+			double sum = 0;
+			int count = 0;
+			while (this->input->getNextTuple(temp) != QE_EOF)
+			{
+				Value value = getAttributeValue(temp, this->attrIndex, this->attrs);
+				if (value.type == AttrType::TypeInt)
+					sum += *(int*)value.data;
+				else if (value.type == AttrType::TypeReal)
+					sum += *(float*)value.data;
+				++count;
+			}
+			if (count == 0)
+			{
 #ifdef DEBUG
-			cerr << "The number of tuples is 0 when calculating AVG" << endl;
+				cerr << "The number of tuples is 0 when calculating AVG" << endl;
 #endif
-			return -1;
+				return -1;
+			}
+			float result = sum / count;
+			memcpy((char*)data + 1, &result, sizeof(float));
+			free(temp);
 		}
-		float result = sum / count;
-		memcpy((char*)data + 1, &result, sizeof(float));
-		free(temp);
-	}
-	break;
-	case AggregateOp::COUNT:
-	{
-		char* temp = (char*)malloc(PAGE_SIZE);
-		float count = 0;
-		while (this->input->getNextTuple(temp) != QE_EOF)
-			++count;
-		memcpy((char*)data + 1, &count, sizeof(float));
-		free(temp);
-	}
-	break;
-	case AggregateOp::MAX:
-	{
-		char* temp = (char*)malloc(PAGE_SIZE);
-		float max = numeric_limits<float>::min();
-		while (this->input->getNextTuple(temp) != QE_EOF)
-		{
-			Value value = getAttributeValue(temp, this->attrIndex, this->attrs);
-			if (value.type == AttrType::TypeInt)
-				max = (float)*(int*)value.data > max ? (float)*(int*)value.data : max;
-			else if (value.type == AttrType::TypeReal)
-				max = *(float*)value.data > max ? *(float*)value.data : max;
-		}
-		memcpy((char*)data + 1, &max, sizeof(float));
-		free(temp);
-	}
-	break;
-	case AggregateOp::MIN:
-	{
-		char* temp = (char*)malloc(PAGE_SIZE);
-		float min = numeric_limits<float>::max();
-		while (this->input->getNextTuple(temp) != QE_EOF)
-		{
-			Value value = getAttributeValue(temp, this->attrIndex, this->attrs);
-			if (value.type == AttrType::TypeInt)
-				min = (float)*(int*)value.data < min ? (float)*(int*)value.data : min;
-			else if (value.type == AttrType::TypeReal)
-				min = *(float*)value.data < min ? *(float*)value.data : min;
-		}
-		memcpy((char*)data + 1, &min, sizeof(float));
-		free(temp);
-	}
-	break;
-	case AggregateOp::SUM:
-	{
-		char* temp = (char*)malloc(PAGE_SIZE);
-		float sum = 0;
-		while (this->input->getNextTuple(temp) != QE_EOF)
-		{
-			Value value = getAttributeValue(temp, this->attrIndex, this->attrs);
-			if (value.type == AttrType::TypeInt)
-				sum += (float)*(int*)value.data;
-			else if (value.type == AttrType::TypeReal)
-				sum += *(float*)value.data;
-		}
-		memcpy((char*)data + 1, &sum, sizeof(float));
-		free(temp);
-	}
-	break;
-	default:
 		break;
+		case AggregateOp::COUNT:
+		{
+			char* temp = (char*)malloc(PAGE_SIZE);
+			float count = 0;
+			while (this->input->getNextTuple(temp) != QE_EOF)
+				++count;
+			memcpy((char*)data + 1, &count, sizeof(float));
+			free(temp);
+		}
+		break;
+		case AggregateOp::MAX:
+		{
+			char* temp = (char*)malloc(PAGE_SIZE);
+			float max = numeric_limits<float>::min();
+			while (this->input->getNextTuple(temp) != QE_EOF)
+			{
+				Value value = getAttributeValue(temp, this->attrIndex, this->attrs);
+				if (value.type == AttrType::TypeInt)
+					max = (float)*(int*)value.data > max ? (float)*(int*)value.data : max;
+				else if (value.type == AttrType::TypeReal)
+					max = *(float*)value.data > max ? *(float*)value.data : max;
+			}
+			memcpy((char*)data + 1, &max, sizeof(float));
+			free(temp);
+		}
+		break;
+		case AggregateOp::MIN:
+		{
+			char* temp = (char*)malloc(PAGE_SIZE);
+			float min = numeric_limits<float>::max();
+			while (this->input->getNextTuple(temp) != QE_EOF)
+			{
+				Value value = getAttributeValue(temp, this->attrIndex, this->attrs);
+				if (value.type == AttrType::TypeInt)
+					min = (float)*(int*)value.data < min ? (float)*(int*)value.data : min;
+				else if (value.type == AttrType::TypeReal)
+					min = *(float*)value.data < min ? *(float*)value.data : min;
+			}
+			memcpy((char*)data + 1, &min, sizeof(float));
+			free(temp);
+		}
+		break;
+		case AggregateOp::SUM:
+		{
+			char* temp = (char*)malloc(PAGE_SIZE);
+			float sum = 0;
+			while (this->input->getNextTuple(temp) != QE_EOF)
+			{
+				Value value = getAttributeValue(temp, this->attrIndex, this->attrs);
+				if (value.type == AttrType::TypeInt)
+					sum += (float)*(int*)value.data;
+				else if (value.type == AttrType::TypeReal)
+					sum += *(float*)value.data;
+			}
+			memcpy((char*)data + 1, &sum, sizeof(float));
+			free(temp);
+		}
+		break;
+		default:
+			break;
+		}
+		this->end = true;
 	}
-	this->end = true;
+	else
+	{
+		if (this->groupResultIter != this->groupResult.end())
+		{
+			int keyLength = 0;
+			if (this->groupResultIter->first.type == AttrType::TypeInt)
+				keyLength = sizeof(int);
+			else if (this->groupResultIter->first.type == AttrType::TypeReal)
+				keyLength = sizeof(float);
+			else if (this->groupResultIter->first.type == AttrType::TypeVarChar)
+				keyLength = sizeof(int) + *(int*)this->groupResultIter->first.data;
+			memcpy((char*)data + 1, this->groupResultIter->first.data, keyLength);
+			switch (this->op)
+			{
+			case AggregateOp::AVG:
+				memcpy((char*)data + 1 + keyLength, &this->groupResultIter->second.avg, sizeof(float));
+				break;
+			case AggregateOp::COUNT:
+				memcpy((char*)data + 1 + keyLength, &this->groupResultIter->second.count, sizeof(float));
+				break;
+			case AggregateOp::MAX:
+				memcpy((char*)data + 1 + keyLength, &this->groupResultIter->second.max, sizeof(float));
+				break;
+			case AggregateOp::MIN:
+				memcpy((char*)data + 1 + keyLength, &this->groupResultIter->second.min, sizeof(float));
+				break;
+			case AggregateOp::SUM:
+				memcpy((char*)data + 1 + keyLength, &this->groupResultIter->second.sum, sizeof(float));
+				break;
+			default:
+				break;
+			}
+			++this->groupResultIter;
+		}
+		else
+		{
+			this->end = true;
+			return QE_EOF;
+		}
+	}
 	return 0;
 }
 
@@ -746,4 +795,83 @@ void Aggregate::getAttributes(vector<Attribute> &attrs) const
 	const string AggregateOpNames[] = { "MIN", "MAX", "COUNT", "SUM", "AVG" };
 	attr.name = AggregateOpNames[op] + "(" + aggAttr.name + ")";
 	attrs.push_back(attr);
+}
+
+Aggregate::Aggregate(Iterator *input,             // Iterator of input R
+	Attribute aggAttr,           // The attribute over which we are computing an aggregate
+	Attribute groupAttr,         // The attribute over which we are grouping the tuples
+	AggregateOp op              // Aggregate operation
+)
+{
+	this->input = input;
+	this->aggAttr = aggAttr;
+	this->op = op;
+	this->input->getAttributes(this->attrs);
+	this->attrIndex = getAttrIndex(this->attrs, this->aggAttr.name);
+	this->end = false;
+	this->isGroupby = true;
+
+	int groupAttrIndex = getAttrIndex(this->attrs, groupAttr.name);
+	char data[PAGE_SIZE];
+	while (input->getNextTuple(data) != QE_EOF)
+	{
+		Value groupValue = getAttributeValue(data, groupAttrIndex, this->attrs);
+		Value key;
+		int keyLength = 0;
+		if (groupValue.type == AttrType::TypeInt)
+			keyLength = sizeof(int);
+		else if (groupValue.type == AttrType::TypeReal)
+			keyLength = sizeof(float);
+		else if (groupValue.type == AttrType::TypeVarChar)
+			keyLength = sizeof(int) + *(int*)groupValue.data;
+		key.type = groupValue.type;
+
+		auto search = this->groupResult.find(groupValue);
+		AggregateResult results;
+		if (search != this->groupResult.end())
+		{
+			results = search->second;
+			key.data = search->first.data;
+		}
+		else
+		{
+			key.data = malloc(keyLength);
+			memcpy(key.data, groupValue.data, keyLength);
+		}
+		Value value = getAttributeValue(data, this->attrIndex, this->attrs);
+		if (value.type == AttrType::TypeInt)
+		{
+			int v = *(int*)value.data;
+			results.sum += v;
+			++results.count;
+			results.avg = results.sum / results.count;
+			results.min = v < results.min ? v : results.min;
+			results.max = v > results.max ? v : results.max;
+		}
+		else if (value.type == AttrType::TypeReal)
+		{
+			float v = *(float*)value.data;
+			results.sum += v;
+			++results.count;
+			results.avg = results.sum / results.count;
+			results.min = v < results.min ? v : results.min;
+			results.max = v > results.max ? v : results.max;
+		}
+
+		if (search != this->groupResult.end())
+			this->groupResult[key] = results;
+		else
+			this->groupResult.insert(make_pair(key, results));
+	}
+
+	if (this->groupResult.size() == 0)
+		this->end = true;
+	else
+		this->groupResultIter = this->groupResult.begin();
+}
+
+Aggregate::~Aggregate()
+{
+	for (auto &i : this->groupResult)
+		free(i.first.data);
 }

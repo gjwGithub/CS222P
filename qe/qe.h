@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <limits>
+#include <map>
 
 #include "../rbf/rbfm.h"
 #include "../rm/rm.h"
@@ -22,6 +23,8 @@ typedef enum{ MIN=0, MAX, COUNT, SUM, AVG } AggregateOp;
 struct Value {
     AttrType type;          // type of value
     void     *data;         // value
+
+	bool operator<(const Value& rhs) const;
 };
 
 
@@ -315,6 +318,24 @@ class GHJoin : public Iterator {
       void getAttributes(vector<Attribute> &attrs) const{};
 };
 
+struct AggregateResult
+{
+	float avg;
+	float count;
+	float max;
+	float min;
+	float sum;
+
+	AggregateResult()
+	{
+		this->avg = 0;
+		this->count = 0;
+		this->max = numeric_limits<float>::min();
+		this->min = numeric_limits<float>::max();
+		this->sum = 0;
+	}
+};
+
 class Aggregate : public Iterator {
     // Aggregation operator
     public:
@@ -331,8 +352,8 @@ class Aggregate : public Iterator {
                   Attribute aggAttr,           // The attribute over which we are computing an aggregate
                   Attribute groupAttr,         // The attribute over which we are grouping the tuples
                   AggregateOp op              // Aggregate operation
-        ){};
-        ~Aggregate(){};
+        );
+        ~Aggregate();
 
         RC getNextTuple(void *data);
         // Please name the output attribute as aggregateOp(aggAttr)
@@ -346,6 +367,9 @@ class Aggregate : public Iterator {
 		vector<Attribute> attrs;
 		int attrIndex;
 		bool end;
+		map<Value, AggregateResult> groupResult;
+		map<Value, AggregateResult>::iterator groupResultIter;
+		bool isGroupby;
 };
 
 #endif
