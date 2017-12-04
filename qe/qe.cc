@@ -477,13 +477,13 @@ RC BNLJoin::getJoin(void *data, void *r_data, int outer_length, void *s_data, in
 	int size = attrs_out.size();
 	int byte_count = ceil((double)size / 8);
 	char* bites = (char*)malloc(byte_count);//the number of fields
-	memcpy(bites, (char *)outers[outer_index].data + offset, byte_count);
+	memcpy(bites, (char *)r_data + offset, byte_count);
 
 	int offset1 = 0;
 	int size1 = attrs_in.size();
 	int byte_count1 = ceil((double)size1 / 8);
 	char* bites1 = (char*)malloc(byte_count1);//the number of fields
-	memcpy(bites1, (char *)outers[outer_index].data + offset1, byte_count1);
+	memcpy(bites1, (char *)s_data + offset1, byte_count1);
 
 
 	int join_size = size + size1;
@@ -874,4 +874,509 @@ Aggregate::~Aggregate()
 {
 	for (auto &i : this->groupResult)
 		free(i.first.data);
+}
+
+GHJoin::GHJoin(Iterator *leftIn,Iterator *rightIn,const Condition &condition,const unsigned numPartitions){
+	this->leftIn = leftIn;
+	this->rightIn = rightIn;
+	this->condition = condition;
+	this->numPartitions = numPartitions;
+	this->leftIn->getAttributes(this->attrs_out);
+	this->rightIn->getAttributes(this->attrs_in);
+	for(int i=0;i<(int)numPartitions;i++){
+		RelationManager::instance()->deleteTable("left_join"+to_string(i));
+		RelationManager::instance()->deleteTable("right_join"+to_string(i));
+	}
+	for(int i=0;i<numPartitions;i++){
+		string left_table="left_join" + to_string(i);
+		RelationManager::instance()->createTable(left_table,attrs_out);
+		string right_table="right_join" + to_string(i);
+		RelationManager::instance()->createTable(right_table,attrs_in);
+	}
+	fillLeftPartitions();
+	fillRightPartitions();
+	map1.clear();
+	map2.clear();
+	map3.clear();
+	for(int i=0;i<attrs_in.size();i++){
+		string_vector_in.push_back(attrs_in[i].name);
+	}
+	for(int i=0;i<attrs_out.size();i++){
+		string_vector_out.push_back(attrs_out[i].name);
+	}
+	map_rPartitions(cur_partition);
+	RelationManager::instance()->scan("right_join0","",NO_OP,NULL,string_vector_in,rm_ite);
+	data_s=malloc(PAGE_SIZE);
+	rm_ite.getNextTuple(rid,data_s);
+}
+void GHJoin::fillLeftPartitions(){
+	int attr_index;
+	for (int i = 0; i<attrs_out.size(); i++) {
+		if (attrs_out[i].name == condition.lhsAttr) {
+			attr_index = i;
+			break;
+		}
+	}
+	cout<<"attr_index: "<<attr_index<<endl;
+	void *data = malloc(PAGE_SIZE);
+	while(this->leftIn->getNextTuple(data) != QE_EOF){
+		int attrtype = 0;
+		int value_int;
+		float value_float;
+		string value_string;
+		find_r_value(attrtype, value_int, value_float, value_string, attr_index, data);
+		if(attrtype==1){
+			int fileindex = value_int % numPartitions;
+			RelationManager::instance()->insertTuple("left_join"+to_string(fileindex),data,rid);
+		}else if(attrtype==2){
+			int fileindex = (int)value_float % numPartitions;
+			RelationManager::instance()->insertTuple("left_join"+to_string(fileindex),data,rid);
+		}else{
+			int fileindex=(value_string[0]-'!') % numPartitions;
+			RelationManager::instance()->insertTuple("left_join"+to_string(fileindex),data,rid);
+			cout<<"string" <<value_string<<endl;
+			cout<<"string index"<<fileindex<<endl;
+		}
+		free(data);
+		data=malloc(PAGE_SIZE);
+	}
+	free(data);
+}
+RC GHJoin::find_r_value(int &attrtype, int &value_int, float &value_float, string &value_string, int attr_index,void* data) {
+	int offset = 0; // offset is the length of record
+	int size = attrs_out.size();
+	int byte_count = ceil((double)size / 8);
+	//calcuate the length of record;
+	char* bites = (char*)malloc(byte_count);//the number of fields
+	memcpy(bites, (char *)data + offset, byte_count);
+	offset = offset + byte_count;
+	for (int i = 0; i<size; i++) {
+		if (!(bites[i / 8] & (1 << (7 - i % 8)))) {
+			if (attrs_out[i].type == TypeVarChar) {
+				int string_size;
+				memcpy(&string_size, (char *)data + offset, 4);
+				offset = offset + string_size + 4;
+				if (i == attr_index) {
+					attrtype = 3;
+					char *value_char = (char *)malloc(string_size + 1);
+					memcpy(value_char, (char *)data + offset - string_size, string_size);
+					value_char[string_size] = '\0';
+					value_string = value_char;
+					break;
+				}
+			}
+			else if (attrs_out[i].type == TypeInt) {
+				if (i == attr_index) {
+					memcpy(&value_int, (char *)data + offset, sizeof(int));
+					attrtype = 1;
+					break;
+				}
+				offset = offset + 4;
+			}
+			else {
+				if (i == attr_index) {
+					memcpy(&value_float, (char *)data + offset, sizeof(float));
+					attrtype = 2;
+					break;
+				}
+				offset = offset + 4;
+			}
+		}
+
+	}
+}
+void GHJoin::fillRightPartitions(){
+	int attr_right_index;
+	for (int i = 0; i<attrs_in.size(); i++) {
+		if (attrs_in[i].name == condition.rhsAttr) {
+			attr_right_index = i;
+			break;
+		}
+	}
+	//find the R value
+	void *data = malloc(PAGE_SIZE);
+	while(this->rightIn->getNextTuple(data) != QE_EOF){
+		int attrtype = 0;
+		int value_int;
+		float value_float;
+		string value_string;
+		find_s_value(attrtype, value_int, value_float, value_string, attr_right_index, data);
+		if(attrtype==1){
+			int fileindex = value_int % numPartitions;
+			RelationManager::instance()->insertTuple("right_join"+to_string(fileindex),data,rid);
+		}else if(attrtype==2){
+			int fileindex = (int)value_float % numPartitions;
+			RelationManager::instance()->insertTuple("right_join"+to_string(fileindex),data,rid);
+		}else{
+			int fileindex=(value_string[0]-'!') % numPartitions;
+			RelationManager::instance()->insertTuple("right_join"+to_string(fileindex),data,rid);
+			cout<<"string right" <<value_string<<endl;
+			cout<<"string right index"<<fileindex<<endl;
+		}
+		free(data);
+		data=malloc(PAGE_SIZE);
+	}
+	free(data);
+}
+RC GHJoin::find_s_value(int &attrtype, int &value_int, float &value_float, string &value_string, int attr_index,void *data) {
+	int offset = 0; // offset is the length of record
+	int size = attrs_in.size();
+	int byte_count = ceil((double)size / 8);
+	//calcuate the length of record;
+	char* bites = (char*)malloc(byte_count);//the number of fields
+	memcpy(bites, (char *)data + offset, byte_count);
+	offset = offset + byte_count;
+	for (int i = 0; i<size; i++) {
+		if (!(bites[i / 8] & (1 << (7 - i % 8)))) {
+			if (attrs_in[i].type == TypeVarChar) {
+				int string_size;
+				memcpy(&string_size, (char *)data + offset, 4);
+				offset = offset + string_size + 4;
+				if (i == attr_index) {
+					attrtype = 3;
+					char *value_char = (char *)malloc(string_size + 1);
+					memcpy(value_char, (char *)data + offset - string_size, string_size);
+					value_char[string_size] = '\0';
+					value_string = value_char;
+					break;
+				}
+			}
+			else if (attrs_in[i].type == TypeInt) {
+				if (i == attr_index) {
+					memcpy(&value_int, (char *)data + offset, sizeof(int));
+					attrtype = 1;
+					break;
+				}
+				offset = offset + 4;
+			}
+			else {
+				if (i == attr_index) {
+					memcpy(&value_float, (char *)data + offset, sizeof(float));
+					attrtype = 2;
+					break;
+				}
+				offset = offset + 4;
+			}
+		}
+
+	}
+}
+RC GHJoin::map_rPartitions(int r_index){
+	RelationManager::instance()->scan("left_join"+to_string(r_index),"",NO_OP,NULL,string_vector_out,rm_ite);
+		void *data=malloc(PAGE_SIZE);
+		//rm_ite.getNextTuple(rid,data);
+		
+		int attr_index;
+		for (int i = 0; i<attrs_out.size(); i++) {
+			if (attrs_out[i].name == condition.lhsAttr) {
+				attr_index = i;
+				break;
+			}
+		}
+		cout<<"attr_index: "<<attr_index<<endl;
+		while(rm_ite.getNextTuple(rid,data) != -1){
+			int attrtype=0;
+			int value_int;
+			float value_float;
+			string value_string;
+		find_r_value(attrtype, value_int, value_float, value_string, attr_index,data);
+		cout<<"map index:"<<r_index<<"  attrtype:"<<attrtype<<"   value:"<<value_string<<endl;
+		if(attrtype==1){
+			it1=map1.find(value_int);
+			if(it1 != map1.end()){
+				int length;
+				getByteLength(attrs_out,data,length);
+				Tuple sig_tuple(data,length);
+				it1->second.push_back(sig_tuple);
+			}else{
+				vector<Tuple> tuple;
+				int length;
+				getByteLength(attrs_out,data,length);
+				Tuple sig_tuple(data,length);
+				tuple.push_back(sig_tuple);
+				map1.insert(make_pair(value_int,tuple));
+			}
+		}else if(attrtype==2){
+			it2=map2.find(value_float);
+			if(it2 != map2.end()){
+				int length;
+				getByteLength(attrs_out,data,length);
+				Tuple sig_tuple(data,length);
+				it2->second.push_back(sig_tuple);
+				//cout<<"left vector size"<<it2->second.size()<<endl;
+			}else{
+				vector<Tuple> tuple;
+				int length;
+				getByteLength(attrs_out,data,length);
+				Tuple sig_tuple(data,length);
+				tuple.push_back(sig_tuple);
+				map2.insert(make_pair(value_float,tuple));
+			}
+		}else{
+			it3=map3.find(value_string);
+			if(it3 != map3.end()){
+				int length;
+				getByteLength(attrs_out,data,length);
+				Tuple sig_tuple(data,length);
+				it3->second.push_back(sig_tuple);
+			}else{
+				vector<Tuple> tuple;
+				int length;
+				getByteLength(attrs_out,data,length);
+				Tuple sig_tuple(data,length);
+				tuple.push_back(sig_tuple);
+				map3.insert(make_pair(value_string,tuple));
+			}
+		}
+		free(data);
+		data=malloc(PAGE_SIZE);
+	}
+	free(data);
+	rm_ite.close();
+	cout<<"map3.size:"<<map3.size()<<endl;
+}
+RC GHJoin::getByteLength(vector<Attribute> attrs, void *data, int &size) {
+	int offset = 0; // offset is the length of record
+	int size1 = attrs.size();
+	int byte_count = ceil((double)size1 / 8);
+
+	//calcuate the length of record;
+	char* bites = (char*)malloc(byte_count);//the number of fields
+	memcpy(bites, (char *)data + offset, byte_count);
+	offset = offset + byte_count;
+	for (int i = 0; i<size1; i++) {
+		if (!(bites[i / 8] & (1 << (7 - i % 8)))) {
+			if (attrs[i].type == TypeVarChar) {
+				int string_size;
+				memcpy(&string_size, (char *)data + offset, 4);
+				offset = offset + string_size + 4;
+			}
+			else {
+				offset = offset + 4;
+			}
+		}
+	}
+	size = offset;
+}
+RC GHJoin::getNextTuple(void *data){
+	int attr_right_index;
+	for (int i = 0; i<attrs_in.size(); i++) {
+		if (attrs_in[i].name == condition.rhsAttr) {
+			attr_right_index = i;
+			break;
+		}
+	}
+	
+	while(true){
+		int attrtype = 0;
+		int value_int;
+		float value_float;
+		string value_string;
+	find_s_value(attrtype, value_int, value_float, value_string, attr_right_index, data_s);
+	if(attrtype==1){
+		it1=map1.find(value_int);
+		if(it1 != map1.end()){
+		if(vector_index<it1->second.size()){
+			int size_s;
+			getByteLength(attrs_in,data_s,size_s);
+			getJoin(data,it1->second[vector_index].data,it1->second[vector_index].length,data_s,size_s);
+			vector_index++;
+			return 0;
+		}else{
+			free(data_s);
+			data_s=malloc(PAGE_SIZE);
+			if(rm_ite.getNextTuple(rid,data_s)!=-1){
+				vector_index=0;
+			}else{
+				rm_ite.close();
+				cur_partition++;
+				if(cur_partition>=(int)numPartitions){
+					for(int i=0;i<(int)numPartitions;i++){
+						RelationManager::instance()->deleteTable("left_join"+to_string(i));
+						RelationManager::instance()->deleteTable("right_join"+to_string(i));
+					}
+					return QE_EOF;
+				}else{
+					map1.clear();
+					map_rPartitions(cur_partition);
+					RelationManager::instance()->scan("right_join"+to_string(cur_partition),"",NO_OP,NULL,string_vector_in,rm_ite);
+					rm_ite.getNextTuple(rid,data_s);
+					vector_index=0;
+				}
+			}
+		}
+	}else{
+		free(data_s);
+		data_s=malloc(PAGE_SIZE);
+		if(rm_ite.getNextTuple(rid,data_s)!=-1){
+				vector_index=0;
+			}else{
+				rm_ite.close();
+				cur_partition++;
+				if(cur_partition>=(int)numPartitions){
+					for(int i=0;i<(int)numPartitions;i++){
+						RelationManager::instance()->deleteTable("left_join"+to_string(i));
+						RelationManager::instance()->deleteTable("right_join"+to_string(i));
+					}
+					return QE_EOF;
+				}else{
+					map1.clear();
+					map_rPartitions(cur_partition);
+					RelationManager::instance()->scan("right_join"+to_string(cur_partition),"",NO_OP,NULL,string_vector_in,rm_ite);
+					rm_ite.getNextTuple(rid,data_s);
+					vector_index=0;
+				}
+			}
+	}
+	}else if(attrtype==2){
+		//cout<<"                 cur_partition            "<<cur_partition<<"     float   "<<value_float<<endl;
+		it2=map2.find(value_float);
+		if(it2 != map2.end()){
+
+		if(vector_index< it2->second.size()){
+			//cout<<"2"<<endl;
+			int size_s;
+			getByteLength(attrs_in,data_s,size_s);
+
+			getJoin(data,it2->second[vector_index].data,it2->second[vector_index].length,data_s,size_s);
+			vector_index++;
+			return 0;
+		}else{
+			free(data_s);
+			data_s=malloc(PAGE_SIZE);
+			if(rm_ite.getNextTuple(rid,data_s)!=-1){
+				//cout<<"3"<<endl;
+				vector_index=0;
+			}else{
+				rm_ite.close();
+				cur_partition++;
+				if(cur_partition>=(int)numPartitions){
+					for(int i=0;i<(int)numPartitions;i++){
+						RelationManager::instance()->deleteTable("left_join"+to_string(i));
+						RelationManager::instance()->deleteTable("right_join"+to_string(i));
+					}
+					return QE_EOF;
+				}else{
+					map2.clear();
+					map_rPartitions(cur_partition);
+					RelationManager::instance()->scan("right_join"+to_string(cur_partition),"",NO_OP,NULL,string_vector_in,rm_ite);
+					rm_ite.getNextTuple(rid,data_s);
+					vector_index=0;
+				}
+			}
+		}
+	}else{
+		free(data_s);
+			data_s=malloc(PAGE_SIZE);
+			if(rm_ite.getNextTuple(rid,data_s)!=-1){
+				//cout<<"4"<<endl;
+				vector_index=0;
+			}else{
+				rm_ite.close();
+				cur_partition++;
+				if(cur_partition>=(int)numPartitions){
+					for(int i=0;i<(int)numPartitions;i++){
+						RelationManager::instance()->deleteTable("left_join"+to_string(i));
+						RelationManager::instance()->deleteTable("right_join"+to_string(i));
+					}
+					return QE_EOF;
+				}else{
+					map2.clear();
+					map_rPartitions(cur_partition);
+					RelationManager::instance()->scan("right_join"+to_string(cur_partition),"",NO_OP,NULL,string_vector_in,rm_ite);
+					rm_ite.getNextTuple(rid,data_s);
+					vector_index=0;
+				}
+			}
+	}
+	}else{
+		it3=map3.find(value_string);
+		if(it3 != map3.end()){
+		if(vector_index<it3->second.size()){
+			cout<<"join string"<<value_string<<endl;
+			int size_s;
+			getByteLength(attrs_in,data_s,size_s);
+			getJoin(data,it3->second[vector_index].data,it3->second[vector_index].length,data_s,size_s);
+			vector_index++;
+			return 0;
+		}else{
+			free(data_s);
+			data_s=malloc(PAGE_SIZE);
+			if(rm_ite.getNextTuple(rid,data_s)!=-1){
+				vector_index=0;
+			}else{
+				rm_ite.close();
+				cur_partition++;
+				if(cur_partition>=(int)numPartitions){
+					//free(data_s);
+					for(int i=0;i<(int)numPartitions;i++){
+						RelationManager::instance()->deleteTable("left_join"+to_string(i));
+						RelationManager::instance()->deleteTable("right_join"+to_string(i));
+					}
+					return QE_EOF;
+				}else{
+					map3.clear();
+					map_rPartitions(cur_partition);
+					RelationManager::instance()->scan("right_join"+to_string(cur_partition),"",NO_OP,NULL,string_vector_in,rm_ite);
+					rm_ite.getNextTuple(rid,data_s);
+					vector_index=0;
+				}
+			}
+		}
+	}else{
+		free(data_s);
+			data_s=malloc(PAGE_SIZE);
+			if(rm_ite.getNextTuple(rid,data_s)!=-1){
+				vector_index=0;
+			}else{
+				rm_ite.close();
+				cur_partition++;
+				if(cur_partition>=(int)numPartitions){
+					//free(data_s);
+					for(int i=0;i<(int)numPartitions;i++){
+						RelationManager::instance()->deleteTable("left_join"+to_string(i));
+						RelationManager::instance()->deleteTable("right_join"+to_string(i));
+					}
+					return QE_EOF;
+				}else{
+					map3.clear();
+					map_rPartitions(cur_partition);
+					RelationManager::instance()->scan("right_join"+to_string(cur_partition),"",NO_OP,NULL,string_vector_in,rm_ite);
+					rm_ite.getNextTuple(rid,data_s);
+					vector_index=0;
+				}
+			}
+	}
+	}
+
+}
+}
+RC GHJoin::getJoin(void *data, void *r_data, int outer_length, void *s_data, int inner_length) {
+	int offset = 0; // offset is the length of record
+	int size = attrs_out.size();
+	int byte_count = ceil((double)size / 8);
+	char* bites = (char*)malloc(byte_count);//the number of fields
+	memcpy(bites, (char *)r_data + offset, byte_count);
+
+	int offset1 = 0;
+	int size1 = attrs_in.size();
+	int byte_count1 = ceil((double)size1 / 8);
+	char* bites1 = (char*)malloc(byte_count1);//the number of fields
+	memcpy(bites1, (char *)s_data + offset1, byte_count1);
+
+
+	int join_size = size + size1;
+	int join_byte_count = ceil((double)join_size / 8);
+	//calcuate the length of record;
+	int join_offset = join_byte_count;
+
+	memcpy((char *)data, bites, byte_count);
+	for (int i = size; i<join_size; i++) {
+		if (!(bites1[(i - size) / 8] & (1 << (7 - (i - size) % 8))));
+		else {
+			((char *)data)[i / 8] = ((char *)data)[i / 8] | (1 << (7 - (i - size) % 8));
+		}
+	}
+	memcpy((char *)data + join_offset, (char *)r_data + byte_count, outer_length - byte_count);
+	memcpy((char *)data + join_offset + outer_length - byte_count, (char *)s_data + byte_count1, inner_length - byte_count1);
 }

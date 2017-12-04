@@ -475,11 +475,15 @@ RC RelationManager::insertTuple(const string &tableName, const void *data, RID &
 				return -1;
 			}
 			/*if (IndexManager::instance()->closeFile(ixfileHandle) == -1)
+=======
+			if (IndexManager::instance()->closeFile(ixfileHandle) == -1)
+>>>>>>> 994ca1648a40b6cfe6713ab144f431074ebd12bf
 			{
 #ifdef DEBUG
 				cerr << "Cannot close the index file while inserting tuple" << endl;
 #endif
 				return -1;
+<<<<<<< HEAD
 			}*/
 		}
 		if (attributes[i].type == AttrType::TypeInt)
@@ -1376,6 +1380,7 @@ bool RelationManager::hasIndex(const string &tableName, const string &attributeN
 			string stringfieldName = fieldName;
 			int hasIndex = *(int *)((char *)returnedData + offset + nullAttributesIndicatorActualSize);
 			offset += sizeof(int);
+
 			if (stringfieldName == attributeName)
 			{
 				this->map_hasIndex[indexFileName] = hasIndex;

@@ -271,6 +271,7 @@ class BNLJoin : public Iterator {
         RC find_r_value(int &attrtype,int &value_int,float &value_float,string &value_string,int attr_index);
         RC find_s_value(int &attrtype,int &value_int,float &value_float,string &value_string,int inner_index,int attr_index);
         RC getJoin(void *data,void *r_data,int outer_length,void *s_data,int inner_length);
+
 };
 
 class INLJoin : public Iterator {
@@ -310,10 +311,37 @@ class GHJoin : public Iterator {
             Iterator *rightIn,               // Iterator of input S
             const Condition &condition,      // Join condition (CompOp is always EQ)
             const unsigned numPartitions     // # of partitions for each relation (decided by the optimizer)
-      ){};
+      );
       ~GHJoin(){};
-
-      RC getNextTuple(void *data){return QE_EOF;};
+      Iterator *leftIn;
+      Iterator *rightIn;
+      Condition condition;
+      unsigned numPartitions;
+      vector<Attribute> attrs_out;
+      vector<Attribute> attrs_in;
+      RM_ScanIterator rm_ite;
+      int vector_index=0;
+      int s_index=0;
+      int cur_partition=0;
+      map<int,vector<Tuple>> map1;
+      map<int,vector<Tuple>>::iterator it1;
+      map<float,vector<Tuple>> map2;
+      map<float,vector<Tuple>>::iterator it2;
+      map<string,vector<Tuple>> map3;
+      map<string,vector<Tuple>>::iterator it3;
+      vector<string> string_vector_in;
+      vector<string> string_vector_out;
+      RID rid;
+      void* data_s;
+      int type=0;
+      RC getNextTuple(void *data);
+      RC find_r_value(int &attrtype, int &value_int, float &value_float, string &value_string, int attr_index,void* data);
+      RC find_s_value(int &attrtype, int &value_int, float &value_float, string &value_string, int attr_index,void *data);
+      RC map_rPartitions(int r_index);
+      RC getByteLength(vector<Attribute> attrs, void *data, int &size);
+      RC getJoin(void *data, void *r_data, int outer_length, void *s_data, int inner_length);
+      void fillLeftPartitions();
+      void fillRightPartitions();
       // For attribute in vector<Attribute>, name it as rel.attr
       void getAttributes(vector<Attribute> &attrs) const{};
 };

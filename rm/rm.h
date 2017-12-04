@@ -20,6 +20,7 @@ public:
   ~RM_ScanIterator() {};
   RBFM_ScanIterator rbfm_ScanIterator;
   FileHandle fileHandle;
+
   // "data" follows the same format as RelationManager::insertTuple()
   RC getNextTuple(RID &rid, void *data) { 
     return rbfm_ScanIterator.getNextRecord(rid,data); };
