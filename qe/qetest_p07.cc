@@ -119,7 +119,7 @@ RC privateTestCase_7() {
 		actualResultCnt++;
 
 	}
-
+	cout<<"act"<<actualResultCnt<<endl;
 	if (expectedResultCnt != actualResultCnt) {
 		cerr << "***** The number of returned tuple: " << actualResultCnt << " is not correct. *****" << endl;
 		rc = fail;
