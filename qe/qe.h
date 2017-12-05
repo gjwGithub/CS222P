@@ -333,6 +333,10 @@ class GHJoin : public Iterator {
       map<string,vector<Tuple>>::iterator it3;
       vector<string> string_vector_in;
       vector<string> string_vector_out;
+      string r_tableName;
+      string s_tableName;
+      int name_id;
+      static int uniq_id;
       RID rid;
       void* data_s;
       int type=0;
@@ -345,7 +349,25 @@ class GHJoin : public Iterator {
       void fillLeftPartitions();
       void fillRightPartitions();
       // For attribute in vector<Attribute>, name it as rel.attr
-      void getAttributes(vector<Attribute> &attrs) const{};
+      void getAttributes(vector<Attribute> &attrs) const;
+};
+
+struct AggregateResult
+{
+	float avg;
+	float count;
+	float max;
+	float min;
+	float sum;
+
+	AggregateResult()
+	{
+		this->avg = 0;
+		this->count = 0;
+		this->max = numeric_limits<float>::min();
+		this->min = numeric_limits<float>::max();
+		this->sum = 0;
+	}
 };
 
 struct AggregateResult
