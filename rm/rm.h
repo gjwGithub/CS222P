@@ -17,14 +17,23 @@ class IXFileHandle;
 class RM_ScanIterator {
 public:
   RM_ScanIterator() {};
-  ~RM_ScanIterator() {};
+  ~RM_ScanIterator() 
+  {
+	  if (fileHandle.currentFileName != "")
+		  RecordBasedFileManager::instance()->closeFile(this->fileHandle);
+  };
   RBFM_ScanIterator rbfm_ScanIterator;
   FileHandle fileHandle;
 
   // "data" follows the same format as RelationManager::insertTuple()
   RC getNextTuple(RID &rid, void *data) { 
     return rbfm_ScanIterator.getNextRecord(rid,data); };
-  RC close() { return rbfm_ScanIterator.close(); };
+  RC close() 
+  { 
+	  if (fileHandle.currentFileName != "")
+		  RecordBasedFileManager::instance()->closeFile(this->fileHandle);
+	  return rbfm_ScanIterator.close(); 
+  };
 };
 
 // RM_IndexScanIterator is an iterator to go through index entries

@@ -315,6 +315,7 @@ RC BNLJoin::getByteLength(vector<Attribute> attrs, void *data, int &size) {
 		}
 	}
 	size = offset;
+	free(bites);
 }
 RC BNLJoin::find_r_value(int &attrtype, int &value_int, float &value_float, string &value_string, int attr_index) {
 	int offset = 0; // offset is the length of record
@@ -358,6 +359,7 @@ RC BNLJoin::find_r_value(int &attrtype, int &value_int, float &value_float, stri
 		}
 
 	}
+	free(bites);
 }
 RC BNLJoin::find_s_value(int &attrtype, int &value_int, float &value_float, string &value_string, int inner_index, int attr_index) {
 	int offset = 0; // offset is the length of record
@@ -401,6 +403,7 @@ RC BNLJoin::find_s_value(int &attrtype, int &value_int, float &value_float, stri
 		}
 
 	}
+	free(bites);
 }
 RC BNLJoin::getNextTuple(void *data) {
 	while (true) {
@@ -500,6 +503,8 @@ RC BNLJoin::getJoin(void *data, void *r_data, int outer_length, void *s_data, in
 	}
 	memcpy((char *)data + join_offset, (char *)r_data + byte_count, outer_length - byte_count);
 	memcpy((char *)data + join_offset + outer_length - byte_count, (char *)s_data + byte_count1, inner_length - byte_count1);
+	free(bites);
+	free(bites1);
 }
 void BNLJoin::getAttributes(vector<Attribute> &attrs) const {
 	for (int i = 0; i<attrs_out.size(); i++) {
@@ -962,6 +967,7 @@ RC GHJoin::find_r_value(int &attrtype, int &value_int, float &value_float, strin
 					memcpy(value_char, (char *)data + offset - string_size, string_size);
 					value_char[string_size] = '\0';
 					value_string = value_char;
+					free(value_char);
 					break;
 				}
 			}
@@ -984,6 +990,7 @@ RC GHJoin::find_r_value(int &attrtype, int &value_int, float &value_float, strin
 		}
 
 	}
+	free(bites);
 }
 void GHJoin::fillRightPartitions(){
 	int attr_right_index;
@@ -1038,6 +1045,7 @@ RC GHJoin::find_s_value(int &attrtype, int &value_int, float &value_float, strin
 					memcpy(value_char, (char *)data + offset - string_size, string_size);
 					value_char[string_size] = '\0';
 					value_string = value_char;
+					free(value_char);
 					break;
 				}
 			}
@@ -1060,6 +1068,7 @@ RC GHJoin::find_s_value(int &attrtype, int &value_int, float &value_float, strin
 		}
 
 	}
+	free(bites);
 }
 RC GHJoin::map_rPartitions(int r_index){
 	RelationManager::instance()->scan("left_join"+to_string(r_index),"",NO_OP,NULL,string_vector_out,rm_ite);
@@ -1156,6 +1165,7 @@ RC GHJoin::getByteLength(vector<Attribute> attrs, void *data, int &size) {
 			}
 		}
 	}
+	free(bites);
 	size = offset;
 }
 RC GHJoin::getNextTuple(void *data){
@@ -1379,4 +1389,6 @@ RC GHJoin::getJoin(void *data, void *r_data, int outer_length, void *s_data, int
 	}
 	memcpy((char *)data + join_offset, (char *)r_data + byte_count, outer_length - byte_count);
 	memcpy((char *)data + join_offset + outer_length - byte_count, (char *)s_data + byte_count1, inner_length - byte_count1);
+	free(bites);
+	free(bites1);
 }
