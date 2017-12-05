@@ -34,7 +34,7 @@ RC testCase_11() {
 	
 	// Create GHJoin
 	GHJoin *ghJoin = new GHJoin(leftIn, rightIn, cond, numPartitons);
-	cout<<"1"<<endl;
+
 	// Go over the data through iterator
 	void *data = malloc(bufSize);
 	bool nullBit = false;
@@ -117,7 +117,7 @@ RC testCase_11() {
 		actualResultCnt++;
 
 	}
-    cout<<"actu"<<actualResultCnt<<endl;
+
 	if (expectedResultCnt != actualResultCnt) {
 		cerr << "***** The number of returned tuple is not correct. *****" << endl;
 		rc = fail;
