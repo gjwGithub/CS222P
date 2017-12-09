@@ -56,7 +56,7 @@ RC privateTestCase_8() {
 	cond.op = EQ_OP;
 	cond.bRhsIsAttr = true;
 	cond.rhsAttr = "rightvarchar.B";
- 
+
 	Condition cond2;
 	cond2.lhsAttr = "leftvarchar.A"; // [20 - 45]
 	cond2.op = EQ_OP;
@@ -70,9 +70,9 @@ RC privateTestCase_8() {
 	
 	// Create GHJoin
 	GHJoin *ghJoin = new GHJoin(filter, filter2, cond, numPartitons);
-	cout<<"11"<<endl;
+
 	GHJoin *ghJoin2 = new GHJoin(ghJoin, anotherRightIn, cond2, numPartitons);
-	cout<<"21"<<endl;
+
 	// Go over the data through iterator
 	void *data = malloc(bufSize);
 	bool nullBit = false;

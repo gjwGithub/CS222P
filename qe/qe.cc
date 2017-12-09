@@ -245,10 +245,21 @@ BNLJoin::BNLJoin(Iterator *leftIn, TableScan *rightIn, const Condition &conditio
 	this->rightIn->getAttributes(this->attrs_in);
 	updateVectorInner();
 }
+
+BNLJoin::~BNLJoin()
+{
+	for (auto &i : this->inners)
+		free(i.data);
+	for (auto &i : this->outers)
+		free(i.data);
+}
+
 RC BNLJoin::updateVectorOuter() {
 	sum_buffer = 0;
+	for (auto &i : this->outers)
+		free(i.data);
 	outers.clear();
-	while (sum_buffer<numPages*PAGE_SIZE) {
+	while (sum_buffer < numPages*PAGE_SIZE) {
 		void *data = malloc(PAGE_SIZE);
 		if (this->leftIn->getNextTuple(data) != QE_EOF) {
 			int sig_length;
@@ -268,8 +279,10 @@ RC BNLJoin::updateVectorOuter() {
 }
 RC BNLJoin::updateVectorInner() {
 	sum_buffer = 0;
+	for (auto &i : this->inners)
+		free(i.data);
 	inners.clear();
-	while (sum_buffer<PAGE_SIZE) {
+	while (sum_buffer < PAGE_SIZE) {
 		void *data = malloc(PAGE_SIZE);
 		if (this->rightIn->getNextTuple(data) != QE_EOF) {
 			int sig_length;
@@ -302,7 +315,7 @@ RC BNLJoin::getByteLength(vector<Attribute> attrs, void *data, int &size) {
 	char* bites = (char*)malloc(byte_count);//the number of fields
 	memcpy(bites, (char *)data + offset, byte_count);
 	offset = offset + byte_count;
-	for (int i = 0; i<size1; i++) {
+	for (int i = 0; i < size1; i++) {
 		if (!(bites[i / 8] & (1 << (7 - i % 8)))) {
 			if (attrs[i].type == TypeVarChar) {
 				int string_size;
@@ -325,7 +338,7 @@ RC BNLJoin::find_r_value(int &attrtype, int &value_int, float &value_float, stri
 	char* bites = (char*)malloc(byte_count);//the number of fields
 	memcpy(bites, (char *)outers[outer_index].data + offset, byte_count);
 	offset = offset + byte_count;
-	for (int i = 0; i<size; i++) {
+	for (int i = 0; i < size; i++) {
 		if (!(bites[i / 8] & (1 << (7 - i % 8)))) {
 			if (attrs_out[i].type == TypeVarChar) {
 				int string_size;
@@ -369,7 +382,7 @@ RC BNLJoin::find_s_value(int &attrtype, int &value_int, float &value_float, stri
 	char* bites = (char*)malloc(byte_count);//the number of fields
 	memcpy(bites, (char *)inners[inner_index].data + offset, byte_count);
 	offset = offset + byte_count;
-	for (int i = 0; i<size; i++) {
+	for (int i = 0; i < size; i++) {
 		if (!(bites[i / 8] & (1 << (7 - i % 8)))) {
 			if (attrs_in[i].type == TypeVarChar) {
 				int string_size;
@@ -407,9 +420,9 @@ RC BNLJoin::find_s_value(int &attrtype, int &value_int, float &value_float, stri
 }
 RC BNLJoin::getNextTuple(void *data) {
 	while (true) {
-		while (outer_index<outers.size()) {
+		while (outer_index < outers.size()) {
 			int attr_index;
-			for (int i = 0; i<attrs_out.size(); i++) {
+			for (int i = 0; i < attrs_out.size(); i++) {
 				if (attrs_out[i].name == condition.lhsAttr) {
 					attr_index = i;
 					break;
@@ -423,13 +436,13 @@ RC BNLJoin::getNextTuple(void *data) {
 			find_r_value(attrtype, value_int, value_float, value_string, attr_index);
 			//find s value
 			int attr_right_index;
-			for (int i = 0; i<attrs_in.size(); i++) {
+			for (int i = 0; i < attrs_in.size(); i++) {
 				if (attrs_in[i].name == condition.rhsAttr) {
 					attr_right_index = i;
 					break;
 				}
 			}
-			for (int i = inner_index; i<inners.size(); i++) {
+			for (int i = inner_index; i < inners.size(); i++) {
 				int attrtype1 = 0;
 				int value_int1;
 				float value_float1;
@@ -495,7 +508,7 @@ RC BNLJoin::getJoin(void *data, void *r_data, int outer_length, void *s_data, in
 	int join_offset = join_byte_count;
 
 	memcpy((char *)data, bites, byte_count);
-	for (int i = size; i<join_size; i++) {
+	for (int i = size; i < join_size; i++) {
 		if (!(bites1[(i - size) / 8] & (1 << (7 - (i - size) % 8))));
 		else {
 			((char *)data)[i / 8] = ((char *)data)[i / 8] | (1 << (7 - (i - size) % 8));
@@ -507,10 +520,10 @@ RC BNLJoin::getJoin(void *data, void *r_data, int outer_length, void *s_data, in
 	free(bites1);
 }
 void BNLJoin::getAttributes(vector<Attribute> &attrs) const {
-	for (int i = 0; i<attrs_out.size(); i++) {
+	for (int i = 0; i < attrs_out.size(); i++) {
 		attrs.push_back(attrs_out[i]);
 	}
-	for (int i = 0; i<attrs_in.size(); i++) {
+	for (int i = 0; i < attrs_in.size(); i++) {
 		attrs.push_back(attrs_in[i]);
 	}
 }
@@ -875,108 +888,35 @@ Aggregate::Aggregate(Iterator *input,             // Iterator of input R
 		this->groupResultIter = this->groupResult.begin();
 }
 
-Aggregate::Aggregate(Iterator *input,             // Iterator of input R
-	Attribute aggAttr,           // The attribute over which we are computing an aggregate
-	Attribute groupAttr,         // The attribute over which we are grouping the tuples
-	AggregateOp op              // Aggregate operation
-)
-{
-	this->input = input;
-	this->aggAttr = aggAttr;
-	this->op = op;
-	this->input->getAttributes(this->attrs);
-	this->attrIndex = getAttrIndex(this->attrs, this->aggAttr.name);
-	this->end = false;
-	this->isGroupby = true;
-
-	int groupAttrIndex = getAttrIndex(this->attrs, groupAttr.name);
-	char data[PAGE_SIZE];
-	while (input->getNextTuple(data) != QE_EOF)
-	{
-		Value groupValue = getAttributeValue(data, groupAttrIndex, this->attrs);
-		Value key;
-		int keyLength = 0;
-		if (groupValue.type == AttrType::TypeInt)
-			keyLength = sizeof(int);
-		else if (groupValue.type == AttrType::TypeReal)
-			keyLength = sizeof(float);
-		else if (groupValue.type == AttrType::TypeVarChar)
-			keyLength = sizeof(int) + *(int*)groupValue.data;
-		key.type = groupValue.type;
-
-		auto search = this->groupResult.find(groupValue);
-		AggregateResult results;
-		if (search != this->groupResult.end())
-		{
-			results = search->second;
-			key.data = search->first.data;
-		}
-		else
-		{
-			key.data = malloc(keyLength);
-			memcpy(key.data, groupValue.data, keyLength);
-		}
-		Value value = getAttributeValue(data, this->attrIndex, this->attrs);
-		if (value.type == AttrType::TypeInt)
-		{
-			int v = *(int*)value.data;
-			results.sum += v;
-			++results.count;
-			results.avg = results.sum / results.count;
-			results.min = v < results.min ? v : results.min;
-			results.max = v > results.max ? v : results.max;
-		}
-		else if (value.type == AttrType::TypeReal)
-		{
-			float v = *(float*)value.data;
-			results.sum += v;
-			++results.count;
-			results.avg = results.sum / results.count;
-			results.min = v < results.min ? v : results.min;
-			results.max = v > results.max ? v : results.max;
-		}
-
-		if (search != this->groupResult.end())
-			this->groupResult[key] = results;
-		else
-			this->groupResult.insert(make_pair(key, results));
-	}
-
-	if (this->groupResult.size() == 0)
-		this->end = true;
-	else
-		this->groupResultIter = this->groupResult.begin();
-}
-
 Aggregate::~Aggregate()
 {
 	for (auto &i : this->groupResult)
 		free(i.first.data);
 }
 
-int GHJoin::uniq_id=0;
+int GHJoin::uniq_id = 0;
 
-GHJoin::GHJoin(Iterator *leftIn,Iterator *rightIn,const Condition &condition,const unsigned numPartitions){
+GHJoin::GHJoin(Iterator *leftIn, Iterator *rightIn, const Condition &condition, const unsigned numPartitions) {
 	this->leftIn = leftIn;
 	this->rightIn = rightIn;
 	this->condition = condition;
 	this->numPartitions = numPartitions;
 	this->leftIn->getAttributes(this->attrs_out);
 	this->rightIn->getAttributes(this->attrs_in);
-	string r_attr_name=attrs_out[0].name;
-	for(int i=0;i<r_attr_name.size();i++){
-		if(r_attr_name[i]=='.'){
-			r_tableName=r_attr_name.substr(0,i);
+	string r_attr_name = attrs_out[0].name;
+	for (int i = 0; i < r_attr_name.size(); i++) {
+		if (r_attr_name[i] == '.') {
+			r_tableName = r_attr_name.substr(0, i);
 		}
 	}
-	string s_attr_name=attrs_in[0].name;
-	for(int i=0;i<s_attr_name.size();i++){
-		if(s_attr_name[i]=='.'){
-			s_tableName=s_attr_name.substr(0,i);
+	string s_attr_name = attrs_in[0].name;
+	for (int i = 0; i < s_attr_name.size(); i++) {
+		if (s_attr_name[i] == '.') {
+			s_tableName = s_attr_name.substr(0, i);
 		}
 	}
 	FILE* file;
-	string aaa="left_join_"+to_string(uniq_id)+"_"+r_tableName+"0";
+	string aaa = "left_join_" + to_string(uniq_id) + "_" + r_tableName + "0";
 	file = fopen(aaa.c_str(), "rb+");
 	if (file == NULL) {
 	}
@@ -984,32 +924,55 @@ GHJoin::GHJoin(Iterator *leftIn,Iterator *rightIn,const Condition &condition,con
 		uniq_id++;
 		fclose(file);
 	}
-	name_id=uniq_id;
-	for(int i=0;i<numPartitions;i++){
-		string left_table="left_join_"+to_string(name_id)+"_"+r_tableName + to_string(i);
-		RelationManager::instance()->createTable(left_table,attrs_out);
-		string right_table="right_join_" +to_string(name_id)+"_"+ s_tableName + to_string(i);
-		RelationManager::instance()->createTable(right_table,attrs_in);
+	name_id = uniq_id;
+	for (int i = 0; i < numPartitions; i++) {
+		string left_table = "left_join_" + to_string(name_id) + "_" + r_tableName + to_string(i);
+		RelationManager::instance()->createTable(left_table, attrs_out);
+		string right_table = "right_join_" + to_string(name_id) + "_" + s_tableName + to_string(i);
+		RelationManager::instance()->createTable(right_table, attrs_in);
 	}
 	fillLeftPartitions();
 	fillRightPartitions();
+	for (auto &i : this->map1)
+		for (auto &j : i.second)
+			free(j.data);
+	for (auto &i : this->map2)
+		for (auto &j : i.second)
+			free(j.data);
+	for (auto &i : this->map3)
+		for (auto &j : i.second)
+			free(j.data);
 	map1.clear();
 	map2.clear();
 	map3.clear();
-	for(int i=0;i<attrs_in.size();i++){
+	for (int i = 0; i < attrs_in.size(); i++) {
 		string_vector_in.push_back(attrs_in[i].name);
 	}
-	for(int i=0;i<attrs_out.size();i++){
+	for (int i = 0; i < attrs_out.size(); i++) {
 		string_vector_out.push_back(attrs_out[i].name);
 	}
 	map_rPartitions(cur_partition);
-	RelationManager::instance()->scan("right_join_"+to_string(name_id)+"_"+s_tableName+"0","",NO_OP,NULL,string_vector_in,rm_ite);
-	data_s=malloc(PAGE_SIZE);
-	rm_ite.getNextTuple(rid,data_s);
+	RelationManager::instance()->scan("right_join_" + to_string(name_id) + "_" + s_tableName + "0", "", NO_OP, NULL, string_vector_in, rm_ite);
+	data_s = malloc(PAGE_SIZE);
+	rm_ite.getNextTuple(rid, data_s);
 }
-void GHJoin::fillLeftPartitions(){
+
+GHJoin::~GHJoin()
+{
+	for (auto &i : this->map1)
+		for (auto &j : i.second)
+			free(j.data);
+	for (auto &i : this->map2)
+		for (auto &j : i.second)
+			free(j.data);
+	for (auto &i : this->map3)
+		for (auto &j : i.second)
+			free(j.data);
+}
+
+void GHJoin::fillLeftPartitions() {
 	int attr_index;
-	for (int i = 0; i<attrs_out.size(); i++) {
+	for (int i = 0; i < attrs_out.size(); i++) {
 		if (attrs_out[i].name == condition.lhsAttr) {
 			attr_index = i;
 			break;
@@ -1017,28 +980,30 @@ void GHJoin::fillLeftPartitions(){
 	}
 	//cout<<"index:"<<attr_index<<endl;
 	void *data = malloc(PAGE_SIZE);
-	while(this->leftIn->getNextTuple(data) != QE_EOF){
+	while (this->leftIn->getNextTuple(data) != QE_EOF) {
 		int attrtype = 0;
 		int value_int;
 		float value_float;
 		string value_string;
 		find_r_value(attrtype, value_int, value_float, value_string, attr_index, data);
-		if(attrtype==1){
+		if (attrtype == 1) {
 			int fileindex = value_int % numPartitions;
-			RelationManager::instance()->insertTuple("left_join_"+to_string(name_id)+"_"+r_tableName+to_string(fileindex),data,rid);
-		}else if(attrtype==2){
+			RelationManager::instance()->insertTuple("left_join_" + to_string(name_id) + "_" + r_tableName + to_string(fileindex), data, rid);
+		}
+		else if (attrtype == 2) {
 			int fileindex = (int)value_float % numPartitions;
-			RelationManager::instance()->insertTuple("left_join_"+to_string(name_id)+"_"+r_tableName+to_string(fileindex),data,rid);
-		}else{
-			int fileindex=(value_string[0]-'!') % numPartitions;
-			RelationManager::instance()->insertTuple("left_join_"+to_string(name_id)+"_"+r_tableName+to_string(fileindex),data,rid);
+			RelationManager::instance()->insertTuple("left_join_" + to_string(name_id) + "_" + r_tableName + to_string(fileindex), data, rid);
+		}
+		else {
+			int fileindex = (value_string[0] - '!') % numPartitions;
+			RelationManager::instance()->insertTuple("left_join_" + to_string(name_id) + "_" + r_tableName + to_string(fileindex), data, rid);
 		}
 		free(data);
-		data=malloc(PAGE_SIZE);
+		data = malloc(PAGE_SIZE);
 	}
 	free(data);
 }
-RC GHJoin::find_r_value(int &attrtype, int &value_int, float &value_float, string &value_string, int attr_index,void* data) {
+RC GHJoin::find_r_value(int &attrtype, int &value_int, float &value_float, string &value_string, int attr_index, void* data) {
 	int offset = 0; // offset is the length of record
 	int size = attrs_out.size();
 	int byte_count = ceil((double)size / 8);
@@ -1046,7 +1011,7 @@ RC GHJoin::find_r_value(int &attrtype, int &value_int, float &value_float, strin
 	char* bites = (char*)malloc(byte_count);//the number of fields
 	memcpy(bites, (char *)data + offset, byte_count);
 	offset = offset + byte_count;
-	for (int i = 0; i<size; i++) {
+	for (int i = 0; i < size; i++) {
 		if (!(bites[i / 8] & (1 << (7 - i % 8)))) {
 			if (attrs_out[i].type == TypeVarChar) {
 				int string_size;
@@ -1083,9 +1048,9 @@ RC GHJoin::find_r_value(int &attrtype, int &value_int, float &value_float, strin
 	}
 	free(bites);
 }
-void GHJoin::fillRightPartitions(){
+void GHJoin::fillRightPartitions() {
 	int attr_right_index;
-	for (int i = 0; i<attrs_in.size(); i++) {
+	for (int i = 0; i < attrs_in.size(); i++) {
 		if (attrs_in[i].name == condition.rhsAttr) {
 			attr_right_index = i;
 			break;
@@ -1093,28 +1058,30 @@ void GHJoin::fillRightPartitions(){
 	}
 	//find the R value
 	void *data = malloc(PAGE_SIZE);
-	while(this->rightIn->getNextTuple(data) != QE_EOF){
+	while (this->rightIn->getNextTuple(data) != QE_EOF) {
 		int attrtype = 0;
 		int value_int;
 		float value_float;
 		string value_string;
 		find_s_value(attrtype, value_int, value_float, value_string, attr_right_index, data);
-		if(attrtype==1){
+		if (attrtype == 1) {
 			int fileindex = value_int % numPartitions;
-			RelationManager::instance()->insertTuple("right_join_"+to_string(name_id)+"_"+s_tableName+to_string(fileindex),data,rid);
-		}else if(attrtype==2){
+			RelationManager::instance()->insertTuple("right_join_" + to_string(name_id) + "_" + s_tableName + to_string(fileindex), data, rid);
+		}
+		else if (attrtype == 2) {
 			int fileindex = (int)value_float % numPartitions;
-			RelationManager::instance()->insertTuple("right_join_"+to_string(name_id)+"_"+s_tableName+to_string(fileindex),data,rid);
-		}else{
-			int fileindex=(value_string[0]-'!') % numPartitions;
-			RelationManager::instance()->insertTuple("right_join_"+to_string(name_id)+"_"+s_tableName+to_string(fileindex),data,rid);
+			RelationManager::instance()->insertTuple("right_join_" + to_string(name_id) + "_" + s_tableName + to_string(fileindex), data, rid);
+		}
+		else {
+			int fileindex = (value_string[0] - '!') % numPartitions;
+			RelationManager::instance()->insertTuple("right_join_" + to_string(name_id) + "_" + s_tableName + to_string(fileindex), data, rid);
 		}
 		free(data);
-		data=malloc(PAGE_SIZE);
+		data = malloc(PAGE_SIZE);
 	}
 	free(data);
 }
-RC GHJoin::find_s_value(int &attrtype, int &value_int, float &value_float, string &value_string, int attr_index,void *data) {
+RC GHJoin::find_s_value(int &attrtype, int &value_int, float &value_float, string &value_string, int attr_index, void *data) {
 	int offset = 0; // offset is the length of record
 	int size = attrs_in.size();
 	int byte_count = ceil((double)size / 8);
@@ -1122,7 +1089,7 @@ RC GHJoin::find_s_value(int &attrtype, int &value_int, float &value_float, strin
 	char* bites = (char*)malloc(byte_count);//the number of fields
 	memcpy(bites, (char *)data + offset, byte_count);
 	offset = offset + byte_count;
-	for (int i = 0; i<size; i++) {
+	for (int i = 0; i < size; i++) {
 		if (!(bites[i / 8] & (1 << (7 - i % 8)))) {
 			if (attrs_in[i].type == TypeVarChar) {
 				int string_size;
@@ -1159,73 +1126,78 @@ RC GHJoin::find_s_value(int &attrtype, int &value_int, float &value_float, strin
 	}
 	free(bites);
 }
-RC GHJoin::map_rPartitions(int r_index){
-	RelationManager::instance()->scan("left_join_"+to_string(name_id)+"_"+r_tableName+to_string(r_index),"",NO_OP,NULL,string_vector_out,rm_ite);
-		void *data=malloc(PAGE_SIZE);
-		//rm_ite.getNextTuple(rid,data);
-		
-		int attr_index;
-		for (int i = 0; i<attrs_out.size(); i++) {
-			if (attrs_out[i].name == condition.lhsAttr) {
-				attr_index = i;
-				break;
+RC GHJoin::map_rPartitions(int r_index) {
+	RelationManager::instance()->scan("left_join_" + to_string(name_id) + "_" + r_tableName + to_string(r_index), "", NO_OP, NULL, string_vector_out, rm_ite);
+	void *data = malloc(PAGE_SIZE);
+	//rm_ite.getNextTuple(rid,data);
+
+	int attr_index;
+	for (int i = 0; i < attrs_out.size(); i++) {
+		if (attrs_out[i].name == condition.lhsAttr) {
+			attr_index = i;
+			break;
+		}
+	}
+	while (rm_ite.getNextTuple(rid, data) != -1) {
+		int attrtype = 0;
+		int value_int;
+		float value_float;
+		string value_string;
+		find_r_value(attrtype, value_int, value_float, value_string, attr_index, data);
+		if (attrtype == 1) {
+			it1 = map1.find(value_int);
+			if (it1 != map1.end()) {
+				int length;
+				getByteLength(attrs_out, data, length);
+				Tuple sig_tuple(data, length);
+				it1->second.push_back(sig_tuple);
+			}
+			else {
+				vector<Tuple> tuple;
+				int length;
+				getByteLength(attrs_out, data, length);
+				Tuple sig_tuple(data, length);
+				tuple.push_back(sig_tuple);
+				map1.insert(make_pair(value_int, tuple));
 			}
 		}
-		while(rm_ite.getNextTuple(rid,data) != -1){
-			int attrtype=0;
-			int value_int;
-			float value_float;
-			string value_string;
-		find_r_value(attrtype, value_int, value_float, value_string, attr_index,data);
-		if(attrtype==1){
-			it1=map1.find(value_int);
-			if(it1 != map1.end()){
+		else if (attrtype == 2) {
+			it2 = map2.find(value_float);
+			if (it2 != map2.end()) {
 				int length;
-				getByteLength(attrs_out,data,length);
-				Tuple sig_tuple(data,length);
-				it1->second.push_back(sig_tuple);
-			}else{
-				vector<Tuple> tuple;
-				int length;
-				getByteLength(attrs_out,data,length);
-				Tuple sig_tuple(data,length);
-				tuple.push_back(sig_tuple);
-				map1.insert(make_pair(value_int,tuple));
-			}
-		}else if(attrtype==2){
-			it2=map2.find(value_float);
-			if(it2 != map2.end()){
-				int length;
-				getByteLength(attrs_out,data,length);
-				Tuple sig_tuple(data,length);
+				getByteLength(attrs_out, data, length);
+				Tuple sig_tuple(data, length);
 				it2->second.push_back(sig_tuple);
 				//cout<<"left vector size"<<it2->second.size()<<endl;
-			}else{
-				vector<Tuple> tuple;
-				int length;
-				getByteLength(attrs_out,data,length);
-				Tuple sig_tuple(data,length);
-				tuple.push_back(sig_tuple);
-				map2.insert(make_pair(value_float,tuple));
 			}
-		}else{
-			it3=map3.find(value_string);
-			if(it3 != map3.end()){
-				int length;
-				getByteLength(attrs_out,data,length);
-				Tuple sig_tuple(data,length);
-				it3->second.push_back(sig_tuple);
-			}else{
+			else {
 				vector<Tuple> tuple;
 				int length;
-				getByteLength(attrs_out,data,length);
-				Tuple sig_tuple(data,length);
+				getByteLength(attrs_out, data, length);
+				Tuple sig_tuple(data, length);
 				tuple.push_back(sig_tuple);
-				map3.insert(make_pair(value_string,tuple));
+				map2.insert(make_pair(value_float, tuple));
+			}
+		}
+		else {
+			it3 = map3.find(value_string);
+			if (it3 != map3.end()) {
+				int length;
+				getByteLength(attrs_out, data, length);
+				Tuple sig_tuple(data, length);
+				it3->second.push_back(sig_tuple);
+			}
+			else {
+				vector<Tuple> tuple;
+				int length;
+				getByteLength(attrs_out, data, length);
+				Tuple sig_tuple(data, length);
+				tuple.push_back(sig_tuple);
+				map3.insert(make_pair(value_string, tuple));
 			}
 		}
 		free(data);
-		data=malloc(PAGE_SIZE);
+		data = malloc(PAGE_SIZE);
 	}
 	free(data);
 	rm_ite.close();
@@ -1239,7 +1211,7 @@ RC GHJoin::getByteLength(vector<Attribute> attrs, void *data, int &size) {
 	char* bites = (char*)malloc(byte_count);//the number of fields
 	memcpy(bites, (char *)data + offset, byte_count);
 	offset = offset + byte_count;
-	for (int i = 0; i<size1; i++) {
+	for (int i = 0; i < size1; i++) {
 		if (!(bites[i / 8] & (1 << (7 - i % 8)))) {
 			if (attrs[i].type == TypeVarChar) {
 				int string_size;
@@ -1254,199 +1226,244 @@ RC GHJoin::getByteLength(vector<Attribute> attrs, void *data, int &size) {
 	free(bites);
 	size = offset;
 }
-RC GHJoin::getNextTuple(void *data){
+RC GHJoin::getNextTuple(void *data) {
 	int attr_right_index;
-	for (int i = 0; i<attrs_in.size(); i++) {
+	for (int i = 0; i < attrs_in.size(); i++) {
 		if (attrs_in[i].name == condition.rhsAttr) {
 			attr_right_index = i;
 			break;
 		}
 	}
-	
-	while(true){
+
+	while (true) {
 		int attrtype = 0;
 		int value_int;
 		float value_float;
 		string value_string;
-	find_s_value(attrtype, value_int, value_float, value_string, attr_right_index, data_s);
-	if(attrtype==1){
-		//cout<<"attr type right:   "<<attrtype<<"value_int right   :"<<value_int<<endl;
-		it1=map1.find(value_int);
-		if(it1 != map1.end()){
-			//cout<<"        outer size      "<<it1->second.size()<<endl;
-		if(vector_index<it1->second.size()){
-			int size_s;
-			getByteLength(attrs_in,data_s,size_s);
-			getJoin(data,it1->second[vector_index].data,it1->second[vector_index].length,data_s,size_s);
-			vector_index++;
-			return 0;
-		}else{
-			free(data_s);
-			data_s=malloc(PAGE_SIZE);
-			if(rm_ite.getNextTuple(rid,data_s)!=-1){
-				vector_index=0;
-			}else{
-				rm_ite.close();
-				cur_partition++;
-				if(cur_partition>=(int)numPartitions){
-					// for(int i=0;i<(int)numPartitions;i++){
-					// 	RelationManager::instance()->deleteTable("left_join_"+r_tableName+to_string(i));
-					// 	RelationManager::instance()->deleteTable("right_join_"+s_tableName+to_string(i));
-					// }
-					return QE_EOF;
-				}else{
-					map1.clear();
-					map_rPartitions(cur_partition);
-					RelationManager::instance()->scan("right_join_"+to_string(name_id)+"_"+s_tableName+to_string(cur_partition),"",NO_OP,NULL,string_vector_in,rm_ite);
-					rm_ite.getNextTuple(rid,data_s);
-					vector_index=0;
+		find_s_value(attrtype, value_int, value_float, value_string, attr_right_index, data_s);
+		if (attrtype == 1) {
+			//cout<<"attr type right:   "<<attrtype<<"value_int right   :"<<value_int<<endl;
+			it1 = map1.find(value_int);
+			if (it1 != map1.end()) {
+				//cout<<"        outer size      "<<it1->second.size()<<endl;
+				if (vector_index < it1->second.size()) {
+					int size_s;
+					getByteLength(attrs_in, data_s, size_s);
+					getJoin(data, it1->second[vector_index].data, it1->second[vector_index].length, data_s, size_s);
+					vector_index++;
+					return 0;
+				}
+				else {
+					free(data_s);
+					data_s = malloc(PAGE_SIZE);
+					if (rm_ite.getNextTuple(rid, data_s) != -1) {
+						vector_index = 0;
+					}
+					else {
+						rm_ite.close();
+						cur_partition++;
+						if (cur_partition >= (int)numPartitions) {
+							// for(int i=0;i<(int)numPartitions;i++){
+							// 	RelationManager::instance()->deleteTable("left_join_"+r_tableName+to_string(i));
+							// 	RelationManager::instance()->deleteTable("right_join_"+s_tableName+to_string(i));
+							// }
+							free(data_s);
+							return QE_EOF;
+						}
+						else {
+							for (auto &i : this->map1)
+								for (auto &j : i.second)
+									free(j.data);
+							map1.clear();
+							map_rPartitions(cur_partition);
+							RelationManager::instance()->scan("right_join_" + to_string(name_id) + "_" + s_tableName + to_string(cur_partition), "", NO_OP, NULL, string_vector_in, rm_ite);
+							rm_ite.getNextTuple(rid, data_s);
+							vector_index = 0;
+						}
+					}
+				}
+			}
+			else {
+				free(data_s);
+				data_s = malloc(PAGE_SIZE);
+				if (rm_ite.getNextTuple(rid, data_s) != -1) {
+					vector_index = 0;
+				}
+				else {
+					rm_ite.close();
+					cur_partition++;
+					if (cur_partition >= (int)numPartitions) {
+						// for(int i=0;i<(int)numPartitions;i++){
+						// 	RelationManager::instance()->deleteTable("left_join_"+r_tableName+to_string(i));
+						// 	RelationManager::instance()->deleteTable("right_join_"+s_tableName+to_string(i));
+						// }
+						free(data_s);
+						return QE_EOF;
+					}
+					else {
+						for (auto &i : this->map1)
+							for (auto &j : i.second)
+								free(j.data);
+						map1.clear();
+						map_rPartitions(cur_partition);
+						RelationManager::instance()->scan("right_join_" + to_string(name_id) + "_" + s_tableName + to_string(cur_partition), "", NO_OP, NULL, string_vector_in, rm_ite);
+						rm_ite.getNextTuple(rid, data_s);
+						vector_index = 0;
+					}
 				}
 			}
 		}
-	}else{
-		free(data_s);
-		data_s=malloc(PAGE_SIZE);
-		if(rm_ite.getNextTuple(rid,data_s)!=-1){
-				vector_index=0;
-			}else{
-				rm_ite.close();
-				cur_partition++;
-				if(cur_partition>=(int)numPartitions){
-					// for(int i=0;i<(int)numPartitions;i++){
-					// 	RelationManager::instance()->deleteTable("left_join_"+r_tableName+to_string(i));
-					// 	RelationManager::instance()->deleteTable("right_join_"+s_tableName+to_string(i));
-					// }
-					return QE_EOF;
-				}else{
-					map1.clear();
-					map_rPartitions(cur_partition);
-					RelationManager::instance()->scan("right_join_"+to_string(name_id)+"_"+s_tableName+to_string(cur_partition),"",NO_OP,NULL,string_vector_in,rm_ite);
-					rm_ite.getNextTuple(rid,data_s);
-					vector_index=0;
+		else if (attrtype == 2) {
+			//cout<<"                 cur_partition            "<<cur_partition<<"     float   "<<value_float<<endl;
+			it2 = map2.find(value_float);
+			if (it2 != map2.end()) {
+
+				if (vector_index < it2->second.size()) {
+					//cout<<"2"<<endl;
+					int size_s;
+					getByteLength(attrs_in, data_s, size_s);
+
+					getJoin(data, it2->second[vector_index].data, it2->second[vector_index].length, data_s, size_s);
+					vector_index++;
+					return 0;
+				}
+				else {
+					free(data_s);
+					data_s = malloc(PAGE_SIZE);
+					if (rm_ite.getNextTuple(rid, data_s) != -1) {
+						//cout<<"3"<<endl;
+						vector_index = 0;
+					}
+					else {
+						rm_ite.close();
+						cur_partition++;
+						if (cur_partition >= (int)numPartitions) {
+							// for(int i=0;i<(int)numPartitions;i++){
+							// 	RelationManager::instance()->deleteTable("left_join_"+r_tableName+to_string(i));
+							// 	RelationManager::instance()->deleteTable("right_join_"+s_tableName+to_string(i));
+							// }
+							free(data_s);
+							return QE_EOF;
+						}
+						else {
+							for (auto &i : this->map2)
+								for (auto &j : i.second)
+									free(j.data);
+							map2.clear();
+							map_rPartitions(cur_partition);
+							RelationManager::instance()->scan("right_join_" + to_string(name_id) + "_" + s_tableName + to_string(cur_partition), "", NO_OP, NULL, string_vector_in, rm_ite);
+							rm_ite.getNextTuple(rid, data_s);
+							vector_index = 0;
+						}
+					}
 				}
 			}
-	}
-	}else if(attrtype==2){
-		//cout<<"                 cur_partition            "<<cur_partition<<"     float   "<<value_float<<endl;
-		it2=map2.find(value_float);
-		if(it2 != map2.end()){
-
-		if(vector_index< it2->second.size()){
-			//cout<<"2"<<endl;
-			int size_s;
-			getByteLength(attrs_in,data_s,size_s);
-
-			getJoin(data,it2->second[vector_index].data,it2->second[vector_index].length,data_s,size_s);
-			vector_index++;
-			return 0;
-		}else{
-			free(data_s);
-			data_s=malloc(PAGE_SIZE);
-			if(rm_ite.getNextTuple(rid,data_s)!=-1){
-				//cout<<"3"<<endl;
-				vector_index=0;
-			}else{
-				rm_ite.close();
-				cur_partition++;
-				if(cur_partition>=(int)numPartitions){
-					// for(int i=0;i<(int)numPartitions;i++){
-					// 	RelationManager::instance()->deleteTable("left_join_"+r_tableName+to_string(i));
-					// 	RelationManager::instance()->deleteTable("right_join_"+s_tableName+to_string(i));
-					// }
-					return QE_EOF;
-				}else{
-					map2.clear();
-					map_rPartitions(cur_partition);
-					RelationManager::instance()->scan("right_join_"+to_string(name_id)+"_"+s_tableName+to_string(cur_partition),"",NO_OP,NULL,string_vector_in,rm_ite);
-					rm_ite.getNextTuple(rid,data_s);
-					vector_index=0;
+			else {
+				free(data_s);
+				data_s = malloc(PAGE_SIZE);
+				if (rm_ite.getNextTuple(rid, data_s) != -1) {
+					//cout<<"4"<<endl;
+					vector_index = 0;
+				}
+				else {
+					rm_ite.close();
+					cur_partition++;
+					if (cur_partition >= (int)numPartitions) {
+						// for(int i=0;i<(int)numPartitions;i++){
+						// 	RelationManager::instance()->deleteTable("left_join_"+r_tableName+to_string(i));
+						// 	RelationManager::instance()->deleteTable("right_join_"+s_tableName+to_string(i));
+						// }
+						free(data_s);
+						return QE_EOF;
+					}
+					else {
+						for (auto &i : this->map2)
+							for (auto &j : i.second)
+								free(j.data);
+						map2.clear();
+						map_rPartitions(cur_partition);
+						RelationManager::instance()->scan("right_join_" + to_string(name_id) + "_" + s_tableName + to_string(cur_partition), "", NO_OP, NULL, string_vector_in, rm_ite);
+						rm_ite.getNextTuple(rid, data_s);
+						vector_index = 0;
+					}
 				}
 			}
 		}
-	}else{
-		free(data_s);
-			data_s=malloc(PAGE_SIZE);
-			if(rm_ite.getNextTuple(rid,data_s)!=-1){
-				//cout<<"4"<<endl;
-				vector_index=0;
-			}else{
-				rm_ite.close();
-				cur_partition++;
-				if(cur_partition>=(int)numPartitions){
-					// for(int i=0;i<(int)numPartitions;i++){
-					// 	RelationManager::instance()->deleteTable("left_join_"+r_tableName+to_string(i));
-					// 	RelationManager::instance()->deleteTable("right_join_"+s_tableName+to_string(i));
-					// }
-					return QE_EOF;
-				}else{
-					map2.clear();
-					map_rPartitions(cur_partition);
-					RelationManager::instance()->scan("right_join_"+to_string(name_id)+"_"+s_tableName+to_string(cur_partition),"",NO_OP,NULL,string_vector_in,rm_ite);
-					rm_ite.getNextTuple(rid,data_s);
-					vector_index=0;
+		else {
+			it3 = map3.find(value_string);
+			if (it3 != map3.end()) {
+				if (vector_index < it3->second.size()) {
+					int size_s;
+					getByteLength(attrs_in, data_s, size_s);
+					getJoin(data, it3->second[vector_index].data, it3->second[vector_index].length, data_s, size_s);
+					vector_index++;
+					return 0;
+				}
+				else {
+					free(data_s);
+					data_s = malloc(PAGE_SIZE);
+					if (rm_ite.getNextTuple(rid, data_s) != -1) {
+						vector_index = 0;
+					}
+					else {
+						rm_ite.close();
+						cur_partition++;
+						if (cur_partition >= (int)numPartitions) {
+							//free(data_s);
+							// for(int i=0;i<(int)numPartitions;i++){
+							// 	RelationManager::instance()->deleteTable("left_join_"+r_tableName+to_string(i));
+							// 	RelationManager::instance()->deleteTable("right_join_"+s_tableName+to_string(i));
+							// }
+							free(data_s);
+							return QE_EOF;
+						}
+						else {
+							for (auto &i : this->map3)
+								for (auto &j : i.second)
+									free(j.data);
+							map3.clear();
+							map_rPartitions(cur_partition);
+							RelationManager::instance()->scan("right_join_" + to_string(name_id) + "_" + s_tableName + to_string(cur_partition), "", NO_OP, NULL, string_vector_in, rm_ite);
+							rm_ite.getNextTuple(rid, data_s);
+							vector_index = 0;
+						}
+					}
 				}
 			}
-	}
-	}else{
-		it3=map3.find(value_string);
-		if(it3 != map3.end()){
-		if(vector_index<it3->second.size()){
-			int size_s;
-			getByteLength(attrs_in,data_s,size_s);
-			getJoin(data,it3->second[vector_index].data,it3->second[vector_index].length,data_s,size_s);
-			vector_index++;
-			return 0;
-		}else{
-			free(data_s);
-			data_s=malloc(PAGE_SIZE);
-			if(rm_ite.getNextTuple(rid,data_s)!=-1){
-				vector_index=0;
-			}else{
-				rm_ite.close();
-				cur_partition++;
-				if(cur_partition>=(int)numPartitions){
-					//free(data_s);
-					// for(int i=0;i<(int)numPartitions;i++){
-					// 	RelationManager::instance()->deleteTable("left_join_"+r_tableName+to_string(i));
-					// 	RelationManager::instance()->deleteTable("right_join_"+s_tableName+to_string(i));
-					// }
-					return QE_EOF;
-				}else{
-					map3.clear();
-					map_rPartitions(cur_partition);
-					RelationManager::instance()->scan("right_join_"+to_string(name_id)+"_"+s_tableName+to_string(cur_partition),"",NO_OP,NULL,string_vector_in,rm_ite);
-					rm_ite.getNextTuple(rid,data_s);
-					vector_index=0;
+			else {
+				free(data_s);
+				data_s = malloc(PAGE_SIZE);
+				if (rm_ite.getNextTuple(rid, data_s) != -1) {
+					vector_index = 0;
+				}
+				else {
+					rm_ite.close();
+					cur_partition++;
+					if (cur_partition >= (int)numPartitions) {
+						//free(data_s);
+						// for(int i=0;i<(int)numPartitions;i++){
+						// 	RelationManager::instance()->deleteTable("left_join_"+r_tableName+to_string(i));
+						// 	RelationManager::instance()->deleteTable("right_join_"+s_tableName+to_string(i));
+						// }
+						free(data_s);
+						return QE_EOF;
+					}
+					else {
+						for (auto &i : this->map3)
+							for (auto &j : i.second)
+								free(j.data);
+						map3.clear();
+						map_rPartitions(cur_partition);
+						RelationManager::instance()->scan("right_join_" + to_string(name_id) + "_" + s_tableName + to_string(cur_partition), "", NO_OP, NULL, string_vector_in, rm_ite);
+						rm_ite.getNextTuple(rid, data_s);
+						vector_index = 0;
+					}
 				}
 			}
 		}
-	}else{
-		free(data_s);
-			data_s=malloc(PAGE_SIZE);
-			if(rm_ite.getNextTuple(rid,data_s)!=-1){
-				vector_index=0;
-			}else{
-				rm_ite.close();
-				cur_partition++;
-				if(cur_partition>=(int)numPartitions){
-					//free(data_s);
-					// for(int i=0;i<(int)numPartitions;i++){
-					// 	RelationManager::instance()->deleteTable("left_join_"+r_tableName+to_string(i));
-					// 	RelationManager::instance()->deleteTable("right_join_"+s_tableName+to_string(i));
-					// }
-					return QE_EOF;
-				}else{
-					map3.clear();
-					map_rPartitions(cur_partition);
-					RelationManager::instance()->scan("right_join_"+to_string(name_id)+"_"+s_tableName+to_string(cur_partition),"",NO_OP,NULL,string_vector_in,rm_ite);
-					rm_ite.getNextTuple(rid,data_s);
-					vector_index=0;
-				}
-			}
-	}
+
 	}
 
-}
 }
 RC GHJoin::getJoin(void *data, void *r_data, int outer_length, void *s_data, int inner_length) {
 	int offset = 0; // offset is the length of record
@@ -1468,7 +1485,7 @@ RC GHJoin::getJoin(void *data, void *r_data, int outer_length, void *s_data, int
 	int join_offset = join_byte_count;
 
 	memcpy((char *)data, bites, byte_count);
-	for (int i = size; i<join_size; i++) {
+	for (int i = size; i < join_size; i++) {
 		if (!(bites1[(i - size) / 8] & (1 << (7 - (i - size) % 8))));
 		else {
 			((char *)data)[i / 8] = ((char *)data)[i / 8] | (1 << (7 - (i - size) % 8));
@@ -1480,11 +1497,11 @@ RC GHJoin::getJoin(void *data, void *r_data, int outer_length, void *s_data, int
 	free(bites1);
 }
 
-void GHJoin::getAttributes(vector<Attribute> &attrs) const{
-	for (int i = 0; i<attrs_out.size(); i++) {
+void GHJoin::getAttributes(vector<Attribute> &attrs) const {
+	for (int i = 0; i < attrs_out.size(); i++) {
 		attrs.push_back(attrs_out[i]);
 	}
-	for (int i = 0; i<attrs_in.size(); i++) {
+	for (int i = 0; i < attrs_in.size(); i++) {
 		attrs.push_back(attrs_in[i]);
 	}
 }
